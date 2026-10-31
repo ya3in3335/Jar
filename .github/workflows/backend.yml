@@ -41,8 +41,12 @@ jobs:
 
   deploy:
     needs: test
-    # Only from main, and only when the token is configured.
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Only from main, and only once the token secret exists. Without this
+    # guard every push fails the run purely for a missing secret.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.DEPLOY_BACKEND == 'true'
     runs-on: ubuntu-latest
     environment: production
     defaults:
@@ -66,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN secret is not set; skipping deploy"
+            echo "::error::DEPLOY_BACKEND is true but CLOUDFLARE_API_TOKEN is not set"
             exit 1
           fi
           npx wrangler deploy

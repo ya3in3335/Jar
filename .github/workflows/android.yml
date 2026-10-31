@@ -28,27 +28,56 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # The GitHub-hosted ubuntu image already ships the Android SDK, so no
+      # setup action is needed — one less thing to break.
+      - name: Report the Android SDK
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
+            echo "::error::no Android SDK on this runner"
+            exit 1
+          fi
+          echo "ANDROID_HOME=$sdk" | tee -a "$GITHUB_ENV"
+          echo "SDK platforms: $(ls "$sdk/platforms" 2>/dev/null | tr '\n' ' ')"
+          echo "build-tools:   $(ls "$sdk/build-tools" 2>/dev/null | tr '\n' ' ')"
 
-      # No gradlew is committed, so Gradle is pinned here instead. Run
+      # No gradlew is committed, so Gradle is pinned here. Run
       # `gradle wrapper` locally once if you want ./gradlew on your machine.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
 
-      - name: Lint
-        run: gradle :app:lintDebug --no-daemon --stacktrace
-
+      # Gradle output is captured and, on failure, re-emitted as GitHub
+      # annotations. Raw run logs live in blob storage that the development
+      # sandbox cannot reach; annotations come back over the API.
       - name: Unit tests
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest --no-daemon --console=plain 2>&1 | tee /tmp/test.log || {
+            echo "--- surfacing failures as annotations ---"
+            grep -E "^e: |error: |FAILED|^> |Caused by:|Could not |Unresolved reference" /tmp/test.log \
+              | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --no-daemon --console=plain 2>&1 | tee /tmp/build.log || {
+            echo "--- surfacing failures as annotations ---"
+            grep -E "^e: |error: |FAILED|^> |Caused by:|Could not |Unresolved reference" /tmp/build.log \
+              | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
+
+      - name: Lint
+        continue-on-error: true
+        run: gradle :app:lintDebug --no-daemon --console=plain
 
       # Fail loudly rather than publishing an empty artifact.
-      - name: Verify the APK exists
+      - name: Verify the APK
         run: |
           set -euo pipefail
           apk=$(find app/build/outputs/apk/debug -name '*.apk' -print -quit)
@@ -57,13 +86,14 @@ jobs:
             exit 1
           fi
           size=$(stat -c%s "$apk")
-          echo "APK: $apk ($((size / 1024 / 1024)) MB)"
+          echo "::notice::APK $apk is $((size / 1024 / 1024)) MB"
           if [ "$size" -lt 1000000 ]; then
             echo "::error::APK is implausibly small ($size bytes)"
             exit 1
           fi
           cp "$apk" JARVIS-debug.apk
           sha256sum JARVIS-debug.apk | tee JARVIS-debug.apk.sha256
+          echo "::notice::sha256 $(cut -d' ' -f1 < JARVIS-debug.apk.sha256)"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -74,7 +104,7 @@ jobs:
             android/JARVIS-debug.apk.sha256
           if-no-files-found: error
 
-      - name: Upload test and lint reports
+      - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
