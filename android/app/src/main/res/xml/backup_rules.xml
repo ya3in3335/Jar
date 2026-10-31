@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Never back up secrets: the Keystore-wrapped key cannot leave this device
+     anyway, so a restored copy would be unreadable noise. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="jarvis_secure_prefs.xml" />
+    <exclude domain="database" path="jarvis.db" />
+</full-backup-content>

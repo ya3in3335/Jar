@@ -1,0 +1,43 @@
+# ---- secrets (never commit) ----
+*.env
+.env
+.env.*
+.dev.vars
+*.keystore
+*.jks
+secrets/
+local.properties
+
+# ---- android ----
+.gradle/
+build/
+captures/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+.idea/
+*.iml
+
+# ---- python / windows ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+*.spec.bak
+.pytest_cache/
+.mypy_cache/
+
+# ---- node / backend ----
+node_modules/
+.wrangler/
+.dev.vars.*
+*.tsbuildinfo
+coverage/
+
+# ---- os / editors ----
+.DS_Store
+Thumbs.db
+*.swp

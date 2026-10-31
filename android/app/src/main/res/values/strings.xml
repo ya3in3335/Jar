@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Base locale is Arabic: this app speaks Arabic first. English is in values-en. -->
+<resources>
+    <string name="app_name">جارفيس</string>
+    <string name="accessibility_service_label">تحكّم جارفيس في الواجهة</string>
+    <string name="accessibility_service_description">يسمح لجارفيس بقراءة ما يظهر على الشاشة والضغط على العناصر عند طلبك ذلك. لا يعمل إلا بعد تمكينك له.</string>
+
+    <!-- States, mirroring AssistantState -->
+    <string name="state_idle">جاهز للاستماع</string>
+    <string name="state_listening">أستمع إليك...</string>
+    <string name="state_understanding">أفهم طلبك...</string>
+    <string name="state_thinking">أفكّر...</string>
+    <string name="state_speaking">أتحدّث...</string>
+    <string name="state_executing">أنفّذ الأمر...</string>
+    <string name="state_success">تم التنفيذ بنجاح</string>
+    <string name="state_error">تعذّر تنفيذ الأمر</string>
+    <string name="state_disconnected">غير متصل</string>
+
+    <!-- Home -->
+    <string name="hint_input">اكتب أمرك، أو اضغط على الميكروفون</string>
+    <string name="action_talk">تحدّث</string>
+    <string name="action_stop_listening">إيقاف الاستماع</string>
+    <string name="action_cancel">إيقاف</string>
+    <string name="action_settings">الإعدادات</string>
+    <string name="action_send">إرسال</string>
+
+    <!-- Settings -->
+    <string name="settings_title">الإعدادات</string>
+    <string name="settings_provider">مزوّد الذكاء</string>
+    <string name="settings_api_key">مفتاح OpenRouter</string>
+    <string name="settings_api_key_help">يُحفَظ على هذا الجهاز فقط، مشفّرًا بمفتاح من Android Keystore. لا يُرسَل إلى أي خادم غير OpenRouter.</string>
+    <string name="settings_model">النموذج</string>
+    <string name="settings_test_connection">اختبار الاتصال</string>
+    <string name="settings_voice">الصوت</string>
+    <string name="settings_voice_pick">اختيار الصوت</string>
+    <string name="settings_speech_rate">سرعة النطق</string>
+    <string name="settings_pitch">درجة الصوت</string>
+    <string name="settings_auto_speak">النطق التلقائي</string>
+    <string name="settings_wake_word">كلمة التنبيه</string>
+    <string name="settings_automation">الأتمتة</string>
+    <string name="settings_accessibility_status">حالة خدمة الوصول</string>
+    <string name="settings_confirm_sensitive">تأكيد الإجراءات الحسّاسة</string>
+    <string name="settings_devices">الأجهزة</string>
+    <string name="settings_privacy">الخصوصية</string>
+    <string name="settings_appearance">المظهر</string>
+    <string name="settings_motion">شدّة الحركة</string>
+    <string name="settings_reduced_motion">تقليل الحركة</string>
+    <string name="settings_usage">استهلاك الذكاء والرموز</string>
+
+    <!-- Pairing -->
+    <string name="pairing_title">إقران جهاز</string>
+    <string name="pairing_show_code">إظهار رمز الإقران</string>
+    <string name="pairing_enter_code">أدخل الرمز</string>
+    <string name="pairing_code_valid">الرمز صالح خمس دقائق</string>
+
+    <!-- Errors (spec section 20) -->
+    <string name="error_no_internet">لا يوجد اتصال بالإنترنت</string>
+    <string name="error_invalid_key">مفتاح الواجهة غير صحيح</string>
+    <string name="error_rate_limited">تجاوزت حدّ الطلبات، حاول بعد قليل</string>
+    <string name="error_model_unsupported">هذا النموذج لا يدعم هذه الخصيصة</string>
+    <string name="error_tts_failed">تعذّر توليد الصوت</string>
+    <string name="error_stt_failed">تعذّر التعرّف على الكلام</string>
+    <string name="error_accessibility_off">خدمة الوصول غير ممكّنة</string>
+    <string name="error_screen_capture_denied">رُفض التقاط الشاشة</string>
+    <string name="error_device_offline">الجهاز غير متصل</string>
+    <string name="error_app_not_installed">التطبيق غير مثبّت</string>
+    <string name="error_element_not_found">لم أجد العنصر المطلوب</string>
+    <string name="error_timeout">انتهت المدّة المحدّدة</string>
+    <string name="error_cancelled">أُلغي الأمر</string>
+    <string name="error_backend_unavailable">الخادم غير متاح</string>
+    <string name="action_retry">إعادة المحاولة</string>
+</resources>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">JARVIS</string>
+    <string name="accessibility_service_label">JARVIS screen control</string>
+    <string name="accessibility_service_description">Lets JARVIS read what is on screen and tap elements when you ask it to. Inactive until you enable it.</string>
+
+    <string name="state_idle">Ready</string>
+    <string name="state_listening">Listening…</string>
+    <string name="state_understanding">Understanding…</string>
+    <string name="state_thinking">Thinking…</string>
+    <string name="state_speaking">Speaking…</string>
+    <string name="state_executing">Running…</string>
+    <string name="state_success">Done</string>
+    <string name="state_error">Could not do that</string>
+    <string name="state_disconnected">Disconnected</string>
+
+    <string name="hint_input">Type a command, or tap the microphone</string>
+    <string name="action_talk">Talk</string>
+    <string name="action_stop_listening">Stop listening</string>
+    <string name="action_cancel">Stop</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_send">Send</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_provider">AI provider</string>
+    <string name="settings_api_key">OpenRouter key</string>
+    <string name="settings_api_key_help">Stored on this device only, encrypted with an Android Keystore key. Sent to no server other than OpenRouter.</string>
+    <string name="settings_model">Model</string>
+    <string name="settings_test_connection">Test connection</string>
+    <string name="settings_voice">Voice</string>
+    <string name="settings_voice_pick">Choose voice</string>
+    <string name="settings_speech_rate">Speech rate</string>
+    <string name="settings_pitch">Pitch</string>
+    <string name="settings_auto_speak">Speak automatically</string>
+    <string name="settings_wake_word">Wake word</string>
+    <string name="settings_automation">Automation</string>
+    <string name="settings_accessibility_status">Accessibility service status</string>
+    <string name="settings_confirm_sensitive">Confirm sensitive actions</string>
+    <string name="settings_devices">Devices</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_motion">Motion intensity</string>
+    <string name="settings_reduced_motion">Reduce motion</string>
+    <string name="settings_usage">AI usage &amp; token control</string>
+
+    <string name="pairing_title">Pair a device</string>
+    <string name="pairing_show_code">Show pairing code</string>
+    <string name="pairing_enter_code">Enter code</string>
+    <string name="pairing_code_valid">Code is valid for five minutes</string>
+
+    <string name="error_no_internet">No internet connection</string>
+    <string name="error_invalid_key">The API key is not valid</string>
+    <string name="error_rate_limited">Rate limit reached, try again shortly</string>
+    <string name="error_model_unsupported">This model does not support that capability</string>
+    <string name="error_tts_failed">Could not generate speech</string>
+    <string name="error_stt_failed">Could not recognise speech</string>
+    <string name="error_accessibility_off">Accessibility service is not enabled</string>
+    <string name="error_screen_capture_denied">Screen capture was denied</string>
+    <string name="error_device_offline">That device is offline</string>
+    <string name="error_app_not_installed">That app is not installed</string>
+    <string name="error_element_not_found">Could not find that element</string>
+    <string name="error_timeout">Timed out</string>
+    <string name="error_cancelled">Cancelled</string>
+    <string name="error_backend_unavailable">Backend unavailable</string>
+    <string name="action_retry">Retry</string>
+</resources>

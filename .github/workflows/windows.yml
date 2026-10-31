@@ -1,0 +1,83 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+  pull_request:
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Logic tests run on Linux too and are much faster there; the packaging
+    # job below is what actually needs Windows.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests -q
+
+  package:
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests on Windows
+        run: python -m pytest tests -q
+
+      - name: Build executable
+        run: pyinstaller --noconfirm jarvis.spec
+
+      - name: Verify the executable exists
+        run: |
+          set -euo pipefail
+          if [ ! -f "dist/JARVIS/JARVIS.exe" ]; then
+            echo "::error::JARVIS.exe was not produced"
+            exit 1
+          fi
+          size=$(stat -c%s "dist/JARVIS/JARVIS.exe")
+          echo "JARVIS.exe: $size bytes"
+
+      - name: Package
+        run: |
+          cd dist
+          7z a -tzip ../JARVIS-Windows.zip JARVIS
+          cd ..
+          sha256sum JARVIS-Windows.zip | tee JARVIS-Windows.zip.sha256
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Windows
+          path: |
+            windows/JARVIS-Windows.zip
+            windows/JARVIS-Windows.zip.sha256
+          if-no-files-found: error

@@ -1,0 +1,33 @@
+name = "jarvis-backend"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# No secrets in this file. Set them with:
+#   wrangler secret put VOICE_API_KEY
+[vars]
+ALLOWED_ORIGINS = ""
+# VOICE_URL = "https://your-voice-engine.example.workers.dev"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[durable_objects.bindings]]
+name = "GUARD"
+class_name = "Guard"
+
+# Hub uses the DO SQLite backend (ctx.storage.sql); Guard is memory-only but
+# must be declared in the same migration tag.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
+new_classes = ["Guard"]
+
+[observability]
+enabled = true
+
+# Optional: bind the voice engine as a service instead of VOICE_URL.
+# [[services]]
+# binding = "VOICE"
+# service = "ai-voice-engine"

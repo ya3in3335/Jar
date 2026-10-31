@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A listening ring with a central bar: the assistant mark, drawn inside
+     the 72dp adaptive-icon safe zone of the 108dp canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,30 m-22,0 a22,22 0 1,0 44,0 a22,22 0 1,0 -44,0"
+        android:strokeColor="#3DDCFF"
+        android:strokeWidth="5" />
+
+    <path
+        android:fillColor="#3DDCFF"
+        android:pathData="M51.5,40 h5 v28 h-5 z" />
+
+    <path
+        android:fillColor="#7AE8FF"
+        android:pathData="M42,50 h4 v12 h-4 z" />
+
+    <path
+        android:fillColor="#7AE8FF"
+        android:pathData="M62,50 h4 v12 h-4 z" />
+</vector>
