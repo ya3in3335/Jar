@@ -5,7 +5,6 @@ keyring>=25.0
 
 # audio capture and endpointing
 sounddevice>=0.5
-webrtcvad-wheels>=2.0.14
 numpy>=1.26
 
 # speech output: SAPI5 gives every voice installed in Windows

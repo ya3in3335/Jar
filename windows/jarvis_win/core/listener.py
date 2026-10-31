@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .stt import SttError, SttProvider, Transcript
-from .vad import SAMPLE_RATE, EndpointConfig, Endpointer, Event, frame_size
+from .vad import SAMPLE_RATE, EndpointConfig, Endpointer, Event, frame_size, make_detector
 
 log = logging.getLogger(__name__)
 
@@ -78,14 +78,14 @@ class VoiceListener:
     def _run(self) -> None:
         try:
             import sounddevice as sd
-            import webrtcvad
         except ImportError:
-            self._emit_error("حزم الميكروفون غير مثبّتة (sounddevice, webrtcvad)")
+            self._emit_error("حزمة sounddevice غير مثبّتة")
             return
 
         import numpy as np
 
-        vad = webrtcvad.Vad(2)  # 0 permissive … 3 aggressive
+        detector = make_detector()
+        log.info("speech detector: %s", detector.name)
         endpointer = Endpointer(self.config, frame_ms=FRAME_MS)
         samples_per_frame = frame_size(FRAME_MS, SAMPLE_RATE)
 
@@ -123,10 +123,7 @@ class VoiceListener:
                     rms = float(np.sqrt(np.mean(block * block))) / 32768.0
                     self.callbacks.on_level(min(1.0, rms * 6.0))
 
-                try:
-                    is_speech = vad.is_speech(frame, SAMPLE_RATE)
-                except Exception:
-                    is_speech = False
+                is_speech = detector.is_speech(frame, SAMPLE_RATE)
 
                 event = endpointer.push(is_speech)
 

@@ -8,3 +8,7 @@
 # itself unavailable rather than failing at the moment you speak.
 -r requirements.txt
 faster-whisper>=1.0
+
+# Sharper speech detection than the built-in energy one. Optional: it
+# carries a native extension that PyInstaller needs a hook for.
+webrtcvad-wheels>=2.0.14

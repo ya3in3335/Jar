@@ -11,8 +11,10 @@ microphone, which is where endpointing bugs actually live.
 
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass
 from enum import Enum, auto
+from math import log10, sqrt
 from typing import Final
 
 FRAME_MS: Final = 20  # webrtcvad accepts 10, 20 or 30 ms frames
@@ -138,3 +140,92 @@ class Endpointer:
 def frame_size(frame_ms: int = FRAME_MS, sample_rate: int = SAMPLE_RATE) -> int:
     """Samples per frame, which webrtcvad requires exactly."""
     return int(sample_rate * frame_ms / 1000)
+
+
+# --------------------------------------------------------- speech detection
+
+
+class SpeechDetector:
+    """Decides whether one frame contains speech."""
+
+    name = "detector"
+
+    def is_speech(self, frame: bytes, sample_rate: int = SAMPLE_RATE) -> bool:
+        raise NotImplementedError
+
+
+class EnergyDetector(SpeechDetector):
+    """Loudness above an adaptive noise floor.
+
+    Dependency-free, so it always packages and always runs. It tracks the
+    room's own noise and treats a frame as speech when it rises clearly
+    above it, which handles a noisy room better than a fixed threshold and
+    avoids a native extension that PyInstaller has to be taught about.
+
+    Less discriminating than a trained VAD — it will call a door slam
+    speech — but the endpointer's minimum-duration rule discards those.
+    """
+
+    name = "energy"
+
+    def __init__(self, margin_db: float = 10.0, floor_db: float = -60.0) -> None:
+        self.margin_db = margin_db
+        self.floor_db = floor_db
+        self._noise_db: float | None = None
+
+    def reset(self) -> None:
+        self._noise_db = None
+
+    @property
+    def noise_floor_db(self) -> float:
+        return self._noise_db if self._noise_db is not None else self.floor_db
+
+    def is_speech(self, frame: bytes, sample_rate: int = SAMPLE_RATE) -> bool:
+        # Stdlib only: a 320-sample RMS does not need numpy, and keeping it
+        # dependency-free means the detector cannot fail to package.
+        if len(frame) < 2:
+            return False
+        block = array("h")
+        block.frombytes(frame[: len(frame) - (len(frame) % 2)])
+        if not block:
+            return False
+
+        rms = sqrt(sum(float(v) * v for v in block) / len(block))
+        db = self.floor_db if rms < 1.0 else 20.0 * log10(rms / 32768.0)
+
+        if self._noise_db is None:
+            self._noise_db = db
+            return False
+
+        speech = db > self._noise_db + self.margin_db
+        if not speech:
+            # Adapt only to quiet frames, or loud speech would drag the
+            # floor up until nothing counted as speech any more.
+            self._noise_db += (db - self._noise_db) * 0.05
+            self._noise_db = max(self._noise_db, self.floor_db)
+        return speech
+
+
+class WebrtcDetector(SpeechDetector):
+    """Google's WebRTC VAD, when it is installed. Better at rejecting noise."""
+
+    name = "webrtc"
+
+    def __init__(self, aggressiveness: int = 2) -> None:
+        import webrtcvad
+
+        self._vad = webrtcvad.Vad(aggressiveness)
+
+    def is_speech(self, frame: bytes, sample_rate: int = SAMPLE_RATE) -> bool:
+        try:
+            return self._vad.is_speech(frame, sample_rate)
+        except Exception:
+            return False
+
+
+def make_detector() -> SpeechDetector:
+    """WebRTC when available, otherwise the built-in energy detector."""
+    try:
+        return WebrtcDetector()
+    except Exception:
+        return EnergyDetector()

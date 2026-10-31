@@ -142,3 +142,92 @@ class TestFrameSize:
     @pytest.mark.parametrize("ms,expected", [(10, 160), (20, 320), (30, 480)])
     def test_frame_sizes_webrtcvad_accepts(self, ms, expected):
         assert frame_size(ms, 16_000) == expected
+
+
+# --------------------------------------------------- speech detection
+
+
+import math
+import struct
+
+from jarvis_win.core.vad import EnergyDetector, make_detector
+
+
+def tone(amplitude: int, samples: int = 320, freq: float = 200.0, rate: int = 16000) -> bytes:
+    """A sine frame at a given amplitude, as 16-bit mono PCM."""
+    values = [
+        int(amplitude * math.sin(2 * math.pi * freq * i / rate))
+        for i in range(samples)
+    ]
+    return struct.pack(f"<{samples}h", *values)
+
+
+SILENCE = tone(5)
+QUIET_ROOM = tone(60)
+SPEECH = tone(6000)
+
+
+class TestEnergyDetector:
+    def test_first_frame_only_calibrates(self):
+        det = EnergyDetector()
+        assert det.is_speech(SPEECH) is False
+
+    def test_loud_frame_after_quiet_ones_is_speech(self):
+        det = EnergyDetector()
+        for _ in range(5):
+            det.is_speech(QUIET_ROOM)
+        assert det.is_speech(SPEECH) is True
+
+    def test_room_noise_is_not_speech(self):
+        det = EnergyDetector()
+        results = [det.is_speech(QUIET_ROOM) for _ in range(40)]
+        assert not any(results)
+
+    def test_noise_floor_adapts_to_a_louder_room(self):
+        det = EnergyDetector()
+        for _ in range(5):
+            det.is_speech(SILENCE)
+        quiet_floor = det.noise_floor_db
+        for _ in range(200):
+            det.is_speech(QUIET_ROOM)
+        assert det.noise_floor_db > quiet_floor
+
+    def test_sustained_speech_does_not_drag_the_floor_up(self):
+        # If the floor adapted during speech, a long sentence would stop
+        # registering partway through.
+        det = EnergyDetector()
+        for _ in range(5):
+            det.is_speech(QUIET_ROOM)
+        before = det.noise_floor_db
+        results = [det.is_speech(SPEECH) for _ in range(100)]
+        assert all(results)
+        assert det.noise_floor_db == before
+
+    def test_empty_frame_is_not_speech(self):
+        assert EnergyDetector().is_speech(b"") is False
+
+    def test_reset_clears_calibration(self):
+        det = EnergyDetector()
+        det.is_speech(QUIET_ROOM)
+        det.reset()
+        assert det.noise_floor_db == det.floor_db
+
+    def test_detector_drives_the_endpointer_end_to_end(self):
+        det = EnergyDetector()
+        ep = Endpointer(
+            EndpointConfig(endpoint_silence_ms=100, min_speech_ms=60, max_utterance_ms=2000, start_frames=3),
+            frame_ms=FRAME,
+        )
+        events = []
+        for frame in [QUIET_ROOM] * 5 + [SPEECH] * 15 + [QUIET_ROOM] * 8:
+            event = ep.push(det.is_speech(frame))
+            if event is not Event.NOTHING:
+                events.append(event)
+        assert Event.SPEECH_STARTED in events
+        assert Event.SPEECH_ENDED in events
+
+
+class TestDetectorSelection:
+    def test_a_detector_is_always_available(self):
+        # Packaging must never leave the app with no way to hear.
+        assert make_detector().name in {"webrtc", "energy"}
