@@ -45,6 +45,9 @@ BLOCKED_NAMES: Final = frozenset(
     }
 )
 
+#: Names that disqualify a folder from being an allowed root at all.
+ROOT_BLOCKED_NAMES: Final = BLOCKED_NAMES - {"appdata"}
+
 #: Extensions that are almost never what a user means to delete by voice.
 SENSITIVE_SUFFIXES: Final = frozenset(
     {".exe", ".dll", ".sys", ".msi", ".bat", ".cmd", ".ps1", ".reg", ".key", ".pem"}
@@ -159,11 +162,14 @@ def validate_root(root: Path) -> str | None:
         return "مسار غير صالح"
     if resolved == resolved.parent:
         return "جذر القرص لا يصلح مجلدًا مسموحًا"
-    blocked = _blocked_component(resolved.parts)
-    if blocked and blocked.strip("\\/").lower() not in {"appdata"}:
-        # AppData is excluded here only because a legitimate root can live
-        # under it (temp dirs, portable installs); the deeper system names
-        # stay blocked.
+    # AppData is dropped from consideration rather than short-circuited:
+    # a legitimate root can live under it (temp dirs, portable installs),
+    # but a System32 deeper in the same path must still be caught.
+    blocked = next(
+        (part for part in resolved.parts if part.strip("\\/").lower() in ROOT_BLOCKED_NAMES),
+        None,
+    )
+    if blocked:
         return f"مجلد نظام لا يصلح مجلدًا مسموحًا: {blocked}"
     return None
 
