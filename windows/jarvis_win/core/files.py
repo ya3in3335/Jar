@@ -109,7 +109,7 @@ def default_allowed_roots(home: Path | None = None) -> list[Path]:
     """The folders deletion is permitted in, out of the box."""
     base = home or Path.home()
     roots = [base / name for name in DEFAULT_ALLOWED_SUBDIRS]
-    return [r for r in roots if r.is_dir()]
+    return [r for r in roots if r.is_dir() and validate_root(r) is None]
 
 
 # ------------------------------------------------------------- validation
@@ -121,30 +121,51 @@ def _is_drive_root(path: Path) -> bool:
     return resolved == resolved.parent
 
 
-def _has_blocked_component(path: Path) -> str | None:
-    for part in path.parts:
+def _blocked_component(parts: Sequence[str]) -> str | None:
+    for part in parts:
         if part.strip("\\/").lower() in BLOCKED_NAMES:
             return part
     return None
 
 
-def _within(path: Path, roots: Sequence[Path]) -> bool:
-    """True when ``path`` really sits inside one of ``roots``.
+def containing_root(path: Path, roots: Sequence[Path]) -> Path | None:
+    """The allowed root ``path`` really sits in, or None.
 
-    Compares the fully resolved path, so a symlink or junction pointing out
-    of an allowed root does not slip through.
+    Compares fully resolved paths, so a symlink or junction pointing out of
+    an allowed root does not slip through.
     """
     try:
         resolved = path.resolve()
     except OSError:
-        return False
+        return None
     for root in roots:
         try:
             resolved.relative_to(root.resolve())
-            return True
+            return root
         except (ValueError, OSError):
             continue
-    return False
+    return None
+
+
+def validate_root(root: Path) -> str | None:
+    """Reject a root that must never be opened up, whatever the user asks.
+
+    Checked when roots are configured rather than per file, because the
+    answer is the same for every path underneath.
+    """
+    try:
+        resolved = root.resolve()
+    except OSError:
+        return "مسار غير صالح"
+    if resolved == resolved.parent:
+        return "جذر القرص لا يصلح مجلدًا مسموحًا"
+    blocked = _blocked_component(resolved.parts)
+    if blocked and blocked.strip("\\/").lower() not in {"appdata"}:
+        # AppData is excluded here only because a legitimate root can live
+        # under it (temp dirs, portable installs); the deeper system names
+        # stay blocked.
+        return f"مجلد نظام لا يصلح مجلدًا مسموحًا: {blocked}"
+    return None
 
 
 def check_path(path: Path, roots: Sequence[Path]) -> str | None:
@@ -153,11 +174,24 @@ def check_path(path: Path, roots: Sequence[Path]) -> str | None:
         return "لم تُحدَّد أي مجلدات مسموح بالحذف داخلها"
     if _is_drive_root(path):
         return "جذر القرص لا يُحذف"
-    blocked = _has_blocked_component(path)
+
+    root = containing_root(path, roots)
+    if root is None:
+        return "خارج المجلدات المسموح بها"
+
+    # Only the part *below* the trusted root is inspected for blocked names.
+    # Checking the whole absolute path would refuse every file whenever the
+    # root itself happened to sit under one (on Windows, anything beneath
+    # AppData), which made nothing deletable at all.
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return "تعذّر تحديد موقع الملف"
+
+    blocked = _blocked_component(relative.parts)
     if blocked:
         return f"مسار محمي: {blocked}"
-    if not _within(path, roots):
-        return "خارج المجلدات المسموح بها"
+
     if path.is_symlink():
         return "اختصار/رابط رمزي لا يُحذف"
     if path.suffix.lower() in SENSITIVE_SUFFIXES:

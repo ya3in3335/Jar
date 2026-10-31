@@ -6,6 +6,8 @@ import pytest
 
 from jarvis_win.core.files import (
     MAX_FILES,
+    validate_root,
+    containing_root,
     Candidate,
     DeletionPlan,
     DeletionRefused,
@@ -51,6 +53,28 @@ class TestScoping:
     def test_drive_root_is_refused(self, sandbox):
         _, roots = sandbox
         assert check_path(Path(Path.cwd().anchor or "/"), roots) is not None
+
+    def test_a_root_under_a_blocked_ancestor_still_works(self, tmp_path):
+        # On Windows a temp or portable folder legitimately lives under
+        # AppData. Refusing the whole subtree made nothing deletable.
+        root = tmp_path / "AppData" / "Local" / "Temp" / "Documents"
+        root.mkdir(parents=True)
+        (root / "note.txt").write_text("x", encoding="utf-8")
+        assert check_path(root / "note.txt", [root]) is None
+
+    def test_blocked_name_below_the_root_is_still_refused(self, tmp_path):
+        root = tmp_path / "Documents"
+        (root / ".git").mkdir(parents=True)
+        (root / ".git" / "HEAD").write_text("x", encoding="utf-8")
+        assert "محمي" in (check_path(root / ".git" / "HEAD", [root]) or "")
+
+    def test_containing_root_is_reported(self, sandbox):
+        _, roots = sandbox
+        assert containing_root(roots[0] / "note.txt", roots) == roots[0]
+
+    def test_containing_root_is_none_outside(self, sandbox):
+        tmp, roots = sandbox
+        assert containing_root(tmp / "Windows" / "system.dll", roots) is None
 
     def test_no_roots_means_nothing_is_deletable(self):
         assert check_path(Path("/tmp/x"), []) is not None
@@ -211,6 +235,21 @@ class TestExecution:
         result = execute(plan)
         assert not result.ok
         assert result.failed
+
+
+class TestRootPolicy:
+    def test_a_system_folder_cannot_be_made_a_root(self, tmp_path):
+        root = tmp_path / "Windows" / "System32"
+        root.mkdir(parents=True)
+        assert validate_root(root) is not None
+
+    def test_drive_root_cannot_be_made_a_root(self):
+        assert validate_root(Path(Path.cwd().anchor or "/")) is not None
+
+    def test_an_ordinary_folder_is_accepted(self, tmp_path):
+        root = tmp_path / "Documents"
+        root.mkdir()
+        assert validate_root(root) is None
 
 
 class TestDefaults:
