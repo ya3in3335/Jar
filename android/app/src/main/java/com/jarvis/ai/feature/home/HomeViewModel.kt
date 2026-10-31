@@ -239,6 +239,9 @@ class HomeViewModel @Inject constructor(
     private suspend fun speak(text: String) {
         val current = settings.value
         go(AssistantState.SPEAKING)
+        // Deaf while talking: otherwise the microphone hears the speaker
+        // and JARVIS transcribes himself into an endless conversation.
+        stt.pauseUplink()
         runCatching {
             voice.speak(
                 text = text,
@@ -248,11 +251,17 @@ class HomeViewModel @Inject constructor(
                 preferredProviderId = current.voiceProvider,
             )
         }.onFailure { e ->
-            if (e is CancellationException) throw e
+            if (e is CancellationException) {
+                // Cancelled playback still has to re-open the uplink, or
+                // the microphone stays mute for the rest of the session.
+                stt.resumeUplink()
+                throw e
+            }
             // A mute assistant is a degraded one, not a failed task: the
             // action already succeeded, so this is reported and no more.
             _ui.value = _ui.value.copy(lastError = e.message)
         }
+        stt.resumeUplink()
         go(AssistantState.IDLE)
     }
 
@@ -349,6 +358,7 @@ class HomeViewModel @Inject constructor(
     fun cancel() {
         runJob?.cancel()
         runJob = null
+        stt.resumeUplink()
         stopListening()
         confirmation?.complete(false)
         voice.stop()

@@ -22,6 +22,17 @@ interface SttEngine {
     fun listen(language: String): Flow<SttEvent>
 
     fun stop()
+
+    /**
+     * Stop sending audio without closing the session.
+     *
+     * Used while the assistant speaks: the phone has one microphone and
+     * one speaker a few centimetres apart, so an open uplink transcribes
+     * the assistant's own voice and it answers itself.
+     */
+    fun pauseUplink()
+
+    fun resumeUplink()
 }
 
 sealed interface SttEvent {

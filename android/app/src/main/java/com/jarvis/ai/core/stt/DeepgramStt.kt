@@ -42,6 +42,7 @@ class DeepgramStt @Inject constructor(
     override val label = "ديبڨرام (تعرّف مباشر)"
 
     @Volatile private var socket: WebSocket? = null
+    @Volatile private var uplinkPaused = false
 
     override fun listen(language: String): Flow<SttEvent> = callbackFlow {
         val session = try {
@@ -66,6 +67,7 @@ class DeepgramStt @Inject constructor(
             return@callbackFlow
         }
 
+        uplinkPaused = false
         val assembler = DeepgramMessages.TurnAssembler()
 
         val request = Request.Builder()
@@ -141,6 +143,10 @@ class DeepgramStt @Inject constructor(
         val pump = launch {
             capture.frames.collect { frame ->
                 if (!isActive) return@collect
+                // Dropped rather than buffered: audio captured while the
+                // assistant was talking is its own voice, and replaying it
+                // afterwards would transcribe it a moment late instead.
+                if (uplinkPaused) return@collect
                 ws.send(frame.pcm.toByteString())
             }
         }
@@ -166,7 +172,16 @@ class DeepgramStt @Inject constructor(
         }
     }
 
+    override fun pauseUplink() {
+        uplinkPaused = true
+    }
+
+    override fun resumeUplink() {
+        uplinkPaused = false
+    }
+
     override fun stop() {
+        uplinkPaused = false
         runCatching {
             socket?.send(DeepgramMessages.CLOSE_MESSAGE)
             socket?.close(1000, "stopped")

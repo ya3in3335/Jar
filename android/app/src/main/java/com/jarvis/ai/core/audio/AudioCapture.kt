@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -105,6 +107,8 @@ class AudioCapture @Inject constructor(private val context: Context) {
         }
 
         lastError = null
+        val effects = attachEffects(recorder.audioSessionId)
+
         job = scope.launch {
             val buffer = ByteArray(FRAME_BYTES)
             try {
@@ -119,6 +123,7 @@ class AudioCapture @Inject constructor(private val context: Context) {
                 lastError = "انقطع الميكروفون: ${e.javaClass.simpleName}"
                 Log.w(TAG, "capture stopped", e)
             } finally {
+                effects.forEach { runCatching { it.release() } }
                 runCatching {
                     if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
                 }
@@ -131,6 +136,32 @@ class AudioCapture @Inject constructor(private val context: Context) {
     fun stop() {
         job?.cancel()
         job = null
+    }
+
+    /**
+     * Turn on the platform's echo canceller and noise suppressor when the
+     * device has them.
+     *
+     * The assistant's own voice leaks from the speaker into the microphone
+     * a few centimetres away. The uplink is muted while it talks, but the
+     * mute cannot be perfectly aligned with playback, and this trims what
+     * slips through at the edges. Both are optional hardware features, so
+     * their absence is normal and not an error.
+     */
+    private fun attachEffects(sessionId: Int): List<android.media.audiofx.AudioEffect> {
+        val effects = mutableListOf<android.media.audiofx.AudioEffect>()
+        if (AcousticEchoCanceler.isAvailable()) {
+            runCatching { AcousticEchoCanceler.create(sessionId) }
+                .getOrNull()
+                ?.also { it.enabled = true; effects += it }
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(sessionId) }
+                .getOrNull()
+                ?.also { it.enabled = true; effects += it }
+        }
+        Log.i(TAG, "audio effects attached: ${effects.size}")
+        return effects
     }
 
     private companion object {
