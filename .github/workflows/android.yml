@@ -59,8 +59,8 @@ jobs:
           set -o pipefail
           gradle :app:testDebugUnitTest --no-daemon --console=plain 2>&1 | tee /tmp/test.log || {
             echo "--- surfacing failures as annotations ---"
-            grep -E "^e: |error: |FAILED|^> |Caused by:|Could not |Unresolved reference" /tmp/test.log \
-              | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            grep -E "^e: |error: |Unresolved reference|Compilation error|Caused by:|FAILED" /tmp/test.log \
+              | grep -v "^> Task" | head -40 | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
 
@@ -69,8 +69,8 @@ jobs:
           set -o pipefail
           gradle :app:assembleDebug --no-daemon --console=plain 2>&1 | tee /tmp/build.log || {
             echo "--- surfacing failures as annotations ---"
-            grep -E "^e: |error: |FAILED|^> |Caused by:|Could not |Unresolved reference" /tmp/build.log \
-              | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            grep -E "^e: |error: |Unresolved reference|Compilation error|Caused by:|FAILED" /tmp/build.log \
+              | grep -v "^> Task" | head -40 | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
 
