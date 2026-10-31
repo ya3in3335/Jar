@@ -45,6 +45,7 @@ import com.jarvis.ai.ui.theme.BgPanel
 import com.jarvis.ai.ui.theme.ErrorRed
 import com.jarvis.ai.ui.theme.SuccessGreen
 import com.jarvis.ai.ui.theme.TextDim
+import com.jarvis.ai.ui.theme.WarnAmber
 import kotlin.math.roundToInt
 
 @Composable
@@ -56,6 +57,7 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsState()
 
     LaunchedEffect(settings.voiceProvider) { viewModel.loadVoices() }
+    LaunchedEffect(Unit) { viewModel.loadSttLanguages() }
 
     Column(
         modifier = Modifier
@@ -182,6 +184,69 @@ fun SettingsScreen(
                 Text(
                     "القائمة أعلاه مقترحات مجانية لم تُتحقَّق من هذا الجهاز بعد.",
                     color = TextDim,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        // --------------------------------------- speech recognition
+        Section(title = "محرّك الصوت") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = settings.sttEngine == "deepgram",
+                    onClick = { viewModel.setSttEngine("deepgram") },
+                    label = { Text("ديبڨرام (مباشر)") },
+                )
+                FilterChip(
+                    selected = settings.sttEngine == "off",
+                    onClick = { viewModel.setSttEngine("off") },
+                    label = { Text("كتابة فقط") },
+                )
+            }
+
+            Text(
+                "ديبڨرام يتعرّف على العربية مباشرة أثناء الكلام، ويكشف بداية ونهاية الجملة، " +
+                    "ويسمح بمقاطعة جارفيس وهو يتحدّث. النطق يبقى بمحرّكاتنا لأن ديبڨرام " +
+                    "لا يوفّر أي صوت عربي.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            if (!ui.backendPaired) {
+                Text(
+                    "الجهاز غير مقترن بالخادم — التعرّف المباشر يحتاج الإقران ليصدر الخادم رمزًا مؤقّتًا.",
+                    color = WarnAmber,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            if (ui.sttLanguages.isNotEmpty()) {
+                Text("اللغة", style = MaterialTheme.typography.bodyLarge)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (language in ui.sttLanguages) {
+                        FilterChip(
+                            selected = settings.sttLanguage == language.code,
+                            onClick = { viewModel.setSttLanguage(language.code) },
+                            label = {
+                                Text(
+                                    listOf(language.label, language.note)
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" — "),
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
+            OutlinedButton(onClick = viewModel::testRecognition, enabled = ui.backendPaired) {
+                Text("اختبار الاتصال بالتعرّف")
+            }
+
+            ui.sttCheck?.let { message ->
+                Text(
+                    message,
+                    color = if (ui.sttCheckOk == true) SuccessGreen else ErrorRed,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

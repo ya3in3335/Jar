@@ -23,4 +23,11 @@ export interface Env {
    * JSON body and returns audio. Takes precedence over Azure when set.
    */
   VOICE_URL?: string;
+
+  /**
+   * Deepgram account key, for minting short-lived device tokens. Secret:
+   *   wrangler secret put DEEPGRAM_API_KEY
+   * It is never sent to a device — only tokens derived from it are.
+   */
+  DEEPGRAM_API_KEY?: string;
 }

@@ -12,6 +12,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 log = logging.getLogger(__name__)
@@ -302,3 +303,123 @@ def pick_provider(providers: list[TtsProvider], preferred_id: str | None = None)
         if provider.is_available():
             return provider
     return None
+
+
+class PiperTtsProvider(TtsProvider):
+    """Piper: neural speech that runs on this machine, free and keyless.
+
+    MIT-licensed, CPU-only, and the voice model downloads itself on first
+    use. This is the answer to "a good Arabic voice without a subscription
+    and without an internet connection" — clearer than SAPI5, and unlike
+    the Edge read-aloud endpoint it is actually licensed for this and will
+    not stop working when a vendor changes its client checks.
+
+    Arabic voice: ar_JO-kareem (male).
+    """
+
+    id = "piper"
+    label = "صوت عربي عصبي محلي (Piper)"
+
+    ARABIC: Final = [
+        Voice("ar_JO-kareem-medium", "كريم", "ar-JO", "Male", "piper"),
+        Voice("ar_JO-kareem-low", "كريم (خفيف)", "ar-JO", "Male", "piper"),
+    ]
+
+    def __init__(self, voice_dir: "Path | None" = None) -> None:
+        self.voice_dir = voice_dir
+        self._voice = None
+        self._loaded_id: str | None = None
+        self._stop = threading.Event()
+
+    def is_available(self) -> bool:
+        try:
+            import piper  # noqa: F401
+        except ImportError:
+            return False
+        return True
+
+    def voices(self) -> list[Voice]:
+        return list(self.ARABIC) if self.is_available() else []
+
+    def _ensure_voice(self, voice_id: str):
+        """Load the model, downloading it the first time it is needed."""
+        if self._voice is not None and self._loaded_id == voice_id:
+            return self._voice
+        try:
+            from piper import PiperVoice
+            from piper.download import ensure_voice_exists, find_voice, get_voices
+        except ImportError as exc:
+            raise TtsError("حزمة piper-tts غير مثبّتة") from exc
+
+        directory = self.voice_dir or _default_voice_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        try:
+            voices_info = get_voices(str(directory), update_voices=False)
+            ensure_voice_exists(voice_id, [str(directory)], str(directory), voices_info)
+            model_path, config_path = find_voice(voice_id, [str(directory)])
+            self._voice = PiperVoice.load(str(model_path), config_path=str(config_path))
+        except Exception as exc:
+            raise TtsError(f"تعذّر تحميل صوت Piper: {type(exc).__name__}") from exc
+
+        self._loaded_id = voice_id
+        return self._voice
+
+    def synthesize_pcm(self, text: str, voice: str | None, rate: str) -> tuple[bytes, int]:
+        """Return raw PCM and its sample rate."""
+        chosen = voice if (voice or "").startswith("ar_") else self.ARABIC[0].id
+        model = self._ensure_voice(chosen)
+
+        # Piper expresses speed as a length scale: larger is slower, so a
+        # negative rate like "-8%" has to invert.
+        length_scale = 1.0 / max(0.5, min(2.0, rate_to_multiplier(rate)))
+
+        chunks: list[bytes] = []
+        try:
+            for audio in model.synthesize_stream_raw(text, length_scale=length_scale):
+                chunks.append(audio)
+        except TypeError:
+            # Older piper builds take no length_scale on the stream call.
+            chunks = list(model.synthesize_stream_raw(text))
+        except Exception as exc:
+            raise TtsError(f"تعذّر توليد الصوت: {type(exc).__name__}") from exc
+
+        sample_rate = getattr(getattr(model, "config", None), "sample_rate", 22050)
+        return b"".join(chunks), int(sample_rate)
+
+    def speak(self, text: str, voice: str | None, pitch: str, rate: str) -> None:
+        pcm, sample_rate = self.synthesize_pcm(text, voice, rate)
+        play_pcm(pcm, sample_rate, self._stop)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def _default_voice_dir() -> "Path":
+    """Where downloaded Piper voices live, beside the other app data."""
+    from .config import config_dir
+
+    return config_dir() / "piper-voices"
+
+
+def play_pcm(pcm: bytes, sample_rate: int, stop_flag: threading.Event | None = None) -> None:
+    """Play raw 16-bit mono PCM."""
+    if stop_flag is not None:
+        stop_flag.clear()
+    try:
+        import numpy as np
+        import sounddevice as sd
+    except ImportError as exc:
+        raise TtsError("حزم تشغيل الصوت غير مثبّتة") from exc
+
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if samples.size == 0:
+        return
+    sd.play(samples, sample_rate)
+    try:
+        while sd.get_stream().active:
+            if stop_flag is not None and stop_flag.is_set():
+                sd.stop()
+                return
+            sd.sleep(50)
+    except Exception:
+        sd.wait()

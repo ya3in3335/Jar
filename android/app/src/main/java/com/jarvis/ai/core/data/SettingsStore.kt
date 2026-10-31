@@ -19,6 +19,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class JarvisSettings(
     val model: String = "anthropic/claude-3.5-haiku",
     val routingMode: String = "balanced", // economy | balanced | quality
+    /** "deepgram" for live streaming recognition, "off" to type only. */
+    val sttEngine: String = "deepgram",
+    /** Recognition language: "ar", "multi", "en", "fr". */
+    val sttLanguage: String = "ar",
     /** "relay" for the cloud Algerian voice, "system" for the device engine. */
     val voiceProvider: String = "relay",
     val voice: String = "ar-DZ-IsmaelNeural",
@@ -40,6 +44,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
         JarvisSettings(
             model = p[Keys.MODEL] ?: JarvisSettings().model,
             routingMode = p[Keys.ROUTING] ?: JarvisSettings().routingMode,
+            sttEngine = p[Keys.STT_ENGINE] ?: JarvisSettings().sttEngine,
+            sttLanguage = p[Keys.STT_LANGUAGE] ?: JarvisSettings().sttLanguage,
             voiceProvider = p[Keys.VOICE_PROVIDER] ?: JarvisSettings().voiceProvider,
             voice = p[Keys.VOICE] ?: JarvisSettings().voice,
             voicePitch = p[Keys.PITCH] ?: JarvisSettings().voicePitch,
@@ -56,6 +62,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setModel(value: String) = edit { it[Keys.MODEL] = value }
     suspend fun setRoutingMode(value: String) = edit { it[Keys.ROUTING] = value }
+    suspend fun setSttEngine(value: String) = edit { it[Keys.STT_ENGINE] = value }
+    suspend fun setSttLanguage(value: String) = edit { it[Keys.STT_LANGUAGE] = value }
     suspend fun setVoiceProvider(value: String) = edit { it[Keys.VOICE_PROVIDER] = value }
     suspend fun setVoice(value: String) = edit { it[Keys.VOICE] = value }
     suspend fun setPitch(value: String) = edit { it[Keys.PITCH] = value }
@@ -74,6 +82,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private object Keys {
         val MODEL = stringPreferencesKey("model")
         val ROUTING = stringPreferencesKey("routing_mode")
+        val STT_ENGINE = stringPreferencesKey("stt_engine")
+        val STT_LANGUAGE = stringPreferencesKey("stt_language")
         val VOICE_PROVIDER = stringPreferencesKey("voice_provider")
         val VOICE = stringPreferencesKey("voice")
         val PITCH = stringPreferencesKey("voice_pitch")

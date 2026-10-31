@@ -8,8 +8,10 @@ import com.jarvis.ai.core.agent.IntentRouter
 import com.jarvis.ai.core.agent.Tool
 import com.jarvis.ai.core.agent.ToolRegistry
 import com.jarvis.ai.core.agent.canGoTo
-import com.jarvis.ai.core.audio.AmplitudeMeter
+import com.jarvis.ai.core.audio.AudioCapture
 import com.jarvis.ai.core.audio.VoiceEngine
+import com.jarvis.ai.core.stt.SttEngine
+import com.jarvis.ai.core.stt.SttEvent
 import com.jarvis.ai.core.data.JarvisSettings
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
@@ -55,7 +57,8 @@ class HomeViewModel @Inject constructor(
     private val agent: AgentRuntime,
     private val registry: ToolRegistry,
     private val voice: VoiceEngine,
-    private val meter: AmplitudeMeter,
+    private val capture: AudioCapture,
+    private val stt: SttEngine,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(
@@ -74,6 +77,7 @@ class HomeViewModel @Inject constructor(
 
     private var runJob: Job? = null
     private var meterJob: Job? = null
+    private var sttJob: Job? = null
     private var confirmation: CompletableDeferred<Boolean>? = null
 
     fun refreshKeyState() {
@@ -259,49 +263,87 @@ class HomeViewModel @Inject constructor(
     }
 
     fun toggleMic(on: Boolean) {
-        _ui.value = _ui.value.copy(micOn = on)
-        go(if (on) AssistantState.LISTENING else AssistantState.IDLE)
-        if (on) startMeter() else stopMeter()
+        _ui.value = _ui.value.copy(micOn = on, lastError = null)
+        if (on) startListening() else stopListening()
     }
 
     /** Needs permission: report honestly instead of showing a dead orb. */
     fun onMicPermissionDenied() {
         _ui.value = _ui.value.copy(
             micOn = false,
-            lastError = "إذن الميكروفون مرفوض، فلا يمكن قياس الصوت",
+            lastError = "إذن الميكروفون مرفوض، فلا يمكن الاستماع",
         )
         go(AssistantState.IDLE)
     }
 
-    private fun startMeter() {
-        meterJob?.cancel()
-        if (!meter.hasPermission()) {
+    private fun startListening() {
+        if (!capture.hasPermission()) {
             onMicPermissionDenied()
             return
         }
+        go(AssistantState.LISTENING)
+
+        // The orb reads the same frames the recogniser does: one recorder,
+        // two consumers (see AudioCapture).
+        meterJob?.cancel()
         meterJob = viewModelScope.launch {
-            meter.levels()
-                .catch { e ->
-                    _ui.value = _ui.value.copy(
-                        lastError = "تعذّر فتح الميكروفون: ${e.javaClass.simpleName}",
-                        micOn = false,
-                    )
-                }
-                .collect { level -> _ui.value = _ui.value.copy(amplitude = level) }
+            capture.frames.collect { frame ->
+                _ui.value = _ui.value.copy(amplitude = frame.level)
+            }
+        }
+
+        sttJob?.cancel()
+        sttJob = viewModelScope.launch {
+            stt.listen(settings.value.sttLanguage).collect(::onSttEvent)
         }
     }
 
-    private fun stopMeter() {
+    private fun stopListening() {
+        sttJob?.cancel()
+        sttJob = null
+        stt.stop()
         meterJob?.cancel()
         meterJob = null
+        capture.stop()
         _ui.value = _ui.value.copy(amplitude = 0f)
+        if (_ui.value.state == AssistantState.LISTENING) go(AssistantState.IDLE)
+    }
+
+    private fun onSttEvent(event: SttEvent) {
+        when (event) {
+            is SttEvent.Ready -> go(AssistantState.LISTENING)
+
+            is SttEvent.SpeechStarted -> {
+                // Barge-in: the user talking over JARVIS stops JARVIS.
+                voice.stop()
+                go(AssistantState.LISTENING)
+            }
+
+            is SttEvent.Partial ->
+                _ui.value = _ui.value.copy(transcript = event.text, activity = "أسمعك...")
+
+            is SttEvent.Final -> {
+                _ui.value = _ui.value.copy(transcript = event.text, activity = null)
+                go(AssistantState.UNDERSTANDING)
+                // Hands-free: one spoken sentence is one instruction.
+                submit(event.text)
+            }
+
+            is SttEvent.UtteranceEnd -> _ui.value = _ui.value.copy(activity = null)
+
+            is SttEvent.Failed -> {
+                _ui.value = _ui.value.copy(lastError = event.message, micOn = false, activity = null)
+                stopListening()
+                go(AssistantState.ERROR)
+            }
+        }
     }
 
     /** Always permitted: an action the user cannot abort is a bug. */
     fun cancel() {
         runJob?.cancel()
         runJob = null
-        stopMeter()
+        stopListening()
         confirmation?.complete(false)
         voice.stop()
         _ui.value = _ui.value.copy(micOn = false, pendingConfirmation = null, activity = null)
@@ -321,7 +363,7 @@ class HomeViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        stopMeter()
+        stopListening()
         voice.stop()
         super.onCleared()
     }

@@ -13,6 +13,13 @@ import { Hub } from "./hub";
 import { Guard } from "./guard";
 import type { Env } from "./env";
 import {
+  ARABIC_LISTEN_PROFILE,
+  SUPPORTED_LANGUAGES,
+  TOKEN_TTL_SECONDS,
+  grantToken,
+  listenUrl,
+} from "./deepgram";
+import {
   ARABIC_MALE_VOICES,
   VOICE_DEFAULTS,
   VOICE_LIMITS,
@@ -207,6 +214,56 @@ export default {
             // Stated plainly so no client advertises emotional synthesis.
             styleSupport: "prosody-only",
             configured: Boolean(env.VOICE_URL || (env.VOICE_API_KEY && env.VOICE_REGION)),
+          }),
+        );
+      }
+
+      // --- speech-to-text: short-lived device credentials ------------------
+      if (p === "/v1/stt/token") {
+        if (req.method !== "POST") throw new HttpError(405, "method_not_allowed", "Use POST");
+        await relayAuth(req, env, "ai");
+
+        if (!env.DEEPGRAM_API_KEY) {
+          throw new HttpError(
+            503,
+            "stt_not_configured",
+            "Set DEEPGRAM_API_KEY on the backend to enable speech recognition",
+          );
+        }
+
+        const requested = Number(url.searchParams.get("ttl") ?? TOKEN_TTL_SECONDS);
+        // Clamp rather than trust: a device asking for a day-long token
+        // would defeat the point of a short-lived credential.
+        const ttl = Math.min(3600, Math.max(30, Number.isFinite(requested) ? requested : TOKEN_TTL_SECONDS));
+
+        const granted = await grantToken(env.DEEPGRAM_API_KEY, ttl);
+        const profile = { ...ARABIC_LISTEN_PROFILE };
+        const language = url.searchParams.get("language");
+        if (language && /^[a-z]{2}(-[A-Z]{2})?$|^multi$/.test(language)) {
+          profile.language = language;
+        }
+
+        return withCors(
+          json({
+            accessToken: granted.accessToken,
+            expiresIn: granted.expiresIn,
+            url: listenUrl(profile),
+            profile,
+          }),
+        );
+      }
+
+      if (p === "/v1/stt/languages" && req.method === "GET") {
+        await relayAuth(req, env, "ai");
+        return withCors(
+          json({
+            languages: SUPPORTED_LANGUAGES,
+            default: ARABIC_LISTEN_PROFILE.language,
+            configured: Boolean(env.DEEPGRAM_API_KEY),
+            // Stated so no client offers an Arabic Deepgram voice that
+            // does not exist.
+            ttsSupported: false,
+            ttsNote: "ديبڨرام لا يوفّر أصواتًا عربية؛ النطق يتم بمحرّكاتنا",
           }),
         );
       }

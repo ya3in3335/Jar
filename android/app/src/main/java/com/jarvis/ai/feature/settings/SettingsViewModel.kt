@@ -7,6 +7,7 @@ import com.jarvis.ai.core.audio.VoiceOption
 import com.jarvis.ai.core.data.JarvisSettings
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
+import com.jarvis.ai.core.net.JarvisBackend
 import com.jarvis.ai.core.net.ModelCapabilities
 import com.jarvis.ai.core.net.OpenRouterClient
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -28,6 +29,10 @@ data class SettingsUiState(
     val toolCapableModels: List<ModelCapabilities.Caps> = emptyList(),
     val loadingModels: Boolean = false,
     val voices: List<VoiceOption> = emptyList(),
+    val sttLanguages: List<JarvisBackend.Language> = emptyList(),
+    val backendPaired: Boolean = false,
+    val sttCheck: String? = null,
+    val sttCheckOk: Boolean? = null,
     val speaking: Boolean = false,
     val notice: String? = null,
 )
@@ -38,12 +43,14 @@ class SettingsViewModel @Inject constructor(
     private val secureStore: SecureStore,
     private val openRouter: OpenRouterClient,
     private val voice: VoiceEngine,
+    private val backend: JarvisBackend,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(
         SettingsUiState(
             hasApiKey = !secureStore.openRouterKey.isNullOrBlank(),
             secureStorageAvailable = secureStore.isAvailable,
+            backendPaired = backend.isPaired,
         ),
     )
     val ui: StateFlow<SettingsUiState> = _ui.asStateFlow()
@@ -113,6 +120,44 @@ class SettingsViewModel @Inject constructor(
             )
         }
     }
+
+    // ------------------------------------------------- speech recognition
+
+    fun loadSttLanguages() {
+        viewModelScope.launch {
+            _ui.value = _ui.value.copy(sttLanguages = backend.sttLanguages(), backendPaired = backend.isPaired)
+        }
+    }
+
+    /**
+     * Ask the backend for a recognition token.
+     *
+     * This checks the whole chain the user cannot see — pairing, the
+     * backend's Deepgram key, and its permission to mint tokens — without
+     * opening a microphone.
+     */
+    fun testRecognition() {
+        _ui.value = _ui.value.copy(sttCheck = null, sttCheckOk = null)
+        viewModelScope.launch {
+            val result = runCatching { backend.sttSession(settings.value.sttLanguage) }
+            _ui.value = result.fold(
+                onSuccess = { session ->
+                    if (session.isUsable) {
+                        _ui.value.copy(
+                            sttCheckOk = true,
+                            sttCheck = "جاهز — رمز صالح ${session.expiresInSeconds} ثانية",
+                        )
+                    } else {
+                        _ui.value.copy(sttCheckOk = false, sttCheck = "الخادم أرجع رمزًا غير صالح")
+                    }
+                },
+                onFailure = { _ui.value.copy(sttCheckOk = false, sttCheck = it.message ?: "فشل الاتصال") },
+            )
+        }
+    }
+
+    fun setSttEngine(value: String) = viewModelScope.launch { settingsStore.setSttEngine(value) }
+    fun setSttLanguage(value: String) = viewModelScope.launch { settingsStore.setSttLanguage(value) }
 
     // ----------------------------------------------------------- the voice
 

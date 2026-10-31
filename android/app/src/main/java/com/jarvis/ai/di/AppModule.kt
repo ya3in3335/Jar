@@ -3,8 +3,11 @@ package com.jarvis.ai.di
 import android.content.Context
 import com.jarvis.ai.core.agent.ToolRegistry
 import com.jarvis.ai.core.agent.defaultToolExecutors
-import com.jarvis.ai.core.audio.AmplitudeMeter
+import com.jarvis.ai.core.audio.AudioCapture
 import com.jarvis.ai.core.audio.VoiceEngine
+import com.jarvis.ai.core.net.JarvisBackend
+import com.jarvis.ai.core.stt.DeepgramStt
+import com.jarvis.ai.core.stt.SttEngine
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
 import dagger.Module
@@ -30,8 +33,17 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun amplitudeMeter(@ApplicationContext context: Context): AmplitudeMeter =
-        AmplitudeMeter(context)
+    fun audioCapture(@ApplicationContext context: Context): AudioCapture = AudioCapture(context)
+
+    @Provides
+    @Singleton
+    fun jarvisBackend(http: OkHttpClient, secureStore: SecureStore): JarvisBackend =
+        JarvisBackend(http, secureStore)
+
+    @Provides
+    @Singleton
+    fun sttEngine(http: OkHttpClient, backend: JarvisBackend, capture: AudioCapture): SttEngine =
+        DeepgramStt(http, backend, capture)
 
     @Provides
     @Singleton
