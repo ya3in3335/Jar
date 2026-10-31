@@ -63,6 +63,8 @@ jobs:
   package:
     needs: test
     runs-on: windows-latest
+    permissions:
+      contents: write # to publish the build as a release asset
     defaults:
       run:
         working-directory: windows
@@ -111,7 +113,36 @@ jobs:
           sha256sum JARVIS-Windows.zip | tee JARVIS-Windows.zip.sha256
           echo "::notice::sha256 $(cut -d' ' -f1 < JARVIS-Windows.zip.sha256)"
 
-      - name: Upload package
+      # An artifact needs a GitHub login and arrives double-zipped. A
+      # release asset is a plain link.
+      - name: Publish as a rolling release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha=$(cut -d' ' -f1 < JARVIS-Windows.zip.sha256)
+          mb=$(( $(stat -c%s JARVIS-Windows.zip) / 1024 / 1024 ))
+          gh release delete windows-debug --yes --cleanup-tag 2>/dev/null || true
+          gh release create windows-debug \
+            JARVIS-Windows.zip JARVIS-Windows.zip.sha256 \
+            --title "JARVIS for Windows (debug)" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --notes "نسخة ويندوز مبنية آليًا من \`${GITHUB_SHA:0:7}\`.
+
+          الحجم: ${mb} ميغابايت
+          SHA-256: \`${sha}\`
+
+          فك الضغط وشغّل JARVIS.exe — لا يحتاج تثبيت.
+
+          للتعرّف على الكلام محليًا: \`pip install -r requirements-stt.txt\` (ينزّل النموذج عند أوّل استخدام).
+          وبدون ذلك يعمل التعرّف عبر أزور إن ضبطت المفتاح.
+
+          انظر docs/BUILD_STATUS.md لما هو مُختبَر وما ليس كذلك."
+          echo "::notice::https://github.com/${GITHUB_REPOSITORY}/releases/download/windows-debug/JARVIS-Windows.zip"
+
+      - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: JARVIS-Windows
