@@ -1,0 +1,10 @@
+# Local speech recognition, kept separate because it is large.
+#
+#   pip install -r requirements-stt.txt
+#
+# The model itself downloads on first use (~480 MB for "small"), so it is
+# not bundled into the installer. Without this, the app still runs and the
+# Azure recogniser remains available; the Whisper engine simply reports
+# itself unavailable rather than failing at the moment you speak.
+-r requirements.txt
+faster-whisper>=1.0

@@ -14,6 +14,13 @@ a = Analysis(
         # static analysis cannot see it.
         "keyring.backends.Windows",
         "win32ctypes.core",
+        # pyttsx3 picks its driver by name at runtime.
+        "pyttsx3.drivers",
+        "pyttsx3.drivers.sapi5",
+        "comtypes",
+        # sounddevice loads PortAudio through cffi.
+        "_sounddevice_data",
+        "send2trash.win.modern",
     ],
     hookspath=[],
     runtime_hooks=[],

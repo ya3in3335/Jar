@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -35,6 +36,8 @@ class MainWindow(QWidget):
     #: Emitted when the user toggles the microphone.
     mic_toggled = Signal(bool)
     settings_requested = Signal()
+    #: Emitted when the user picks a different voice.
+    voice_changed = Signal(str)
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -72,6 +75,12 @@ class MainWindow(QWidget):
         self.connection_dot = QLabel("●")
         self.connection_dot.setToolTip("حالة الاتصال بالخادم")
         header.addWidget(self.connection_dot)
+
+        self.voice_picker = QComboBox()
+        self.voice_picker.setToolTip("الصوت")
+        self.voice_picker.setMinimumWidth(170)
+        self.voice_picker.currentIndexChanged.connect(self._on_voice_changed)
+        header.addWidget(self.voice_picker)
 
         settings_btn = QPushButton("الإعدادات")
         settings_btn.clicked.connect(self.settings_requested.emit)
@@ -168,7 +177,36 @@ class MainWindow(QWidget):
             self.machine.go(AssistantState.IDLE)
 
     def show_text(self, text: str) -> None:
+        self.transcript.setStyleSheet("")
         self.transcript.setText(text)
+
+    def show_error(self, message: str) -> None:
+        self.transcript.setStyleSheet(f"color: {PALETTE.error};")
+        self.transcript.setText(message)
+
+    def populate_voices(self, voices) -> None:
+        """Fill the picker with the voices this machine can actually use."""
+        self.voice_picker.blockSignals(True)
+        self.voice_picker.clear()
+        if not voices:
+            self.voice_picker.addItem("لا توجد أصوات متاحة", None)
+            self.voice_picker.setEnabled(False)
+        else:
+            self.voice_picker.setEnabled(True)
+            for voice in voices:
+                self.voice_picker.addItem(voice.display, voice.id)
+            index = self.voice_picker.findData(self.settings.voice)
+            if index >= 0:
+                self.voice_picker.setCurrentIndex(index)
+        self.voice_picker.blockSignals(False)
+
+    def _on_voice_changed(self, index: int) -> None:
+        voice_id = self.voice_picker.itemData(index)
+        if not voice_id:
+            return
+        self.settings.voice = voice_id
+        self.settings.save()
+        self.voice_changed.emit(voice_id)
 
     def append_text(self, chunk: str) -> None:
         """Append streamed model output without reflowing the whole label."""

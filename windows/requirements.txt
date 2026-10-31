@@ -2,3 +2,15 @@ PySide6>=6.8,<7
 httpx>=0.27
 websockets>=13.0
 keyring>=25.0
+
+# audio capture and endpointing
+sounddevice>=0.5
+webrtcvad-wheels>=2.0.14
+numpy>=1.26
+
+# speech output: SAPI5 gives every voice installed in Windows
+pyttsx3>=2.90
+miniaudio>=1.59
+
+# deletion goes to the Recycle Bin, never straight to erase
+Send2Trash>=1.8

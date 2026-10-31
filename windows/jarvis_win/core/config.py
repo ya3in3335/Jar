@@ -29,6 +29,7 @@ except Exception:  # pragma: no cover - exercised only where keyring is absent
 SERVICE: Final = "JARVIS"
 _TOKEN_KEY: Final = "device_token"
 _OPENROUTER_KEY: Final = "openrouter_api_key"
+_AZURE_KEY: Final = "azure_speech_key"
 
 
 def config_dir() -> Path:
@@ -48,6 +49,17 @@ class Settings:
     model: str = "anthropic/claude-3.5-haiku"
     routing_mode: str = "balanced"  # economy | balanced | quality
     voice: str = "ar-DZ-IsmaelNeural"
+    # "sapi5" for the voices installed in Windows, "azure" for the neural ones.
+    tts_provider: str = "sapi5"
+    # "whisper" runs locally, "azure" is faster but needs a key.
+    stt_provider: str = "whisper"
+    whisper_model: str = "small"
+    azure_region: str = ""
+    # Silence that ends an utterance; lower feels snappier, higher is kinder
+    # to people who pause mid-sentence.
+    endpoint_silence_ms: int = 700
+    # Folders deletion is permitted in. Empty means the defaults under home.
+    allowed_delete_roots: list[str] = field(default_factory=list)
     voice_pitch: str = "-15Hz"
     voice_rate: str = "-8%"
     auto_speak: bool = True
@@ -141,6 +153,14 @@ def set_device_token(token: str | None) -> bool:
 
 def get_openrouter_key() -> str | None:
     return _get(_OPENROUTER_KEY)
+
+
+def get_azure_key() -> str | None:
+    return _get(_AZURE_KEY)
+
+
+def set_azure_key(key: str | None) -> bool:
+    return _set(_AZURE_KEY, key)
 
 
 def set_openrouter_key(key: str | None) -> bool:
