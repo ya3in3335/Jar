@@ -1,5 +1,9 @@
 package com.jarvis.ai.core.agent
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+
 /**
  * Local intent router — spec section 16B.
  *
@@ -99,6 +103,21 @@ object IntentRouter {
             appAliases[candidate]?.let { return it }
         }
         return null
+    }
+
+    /** Convert routed args into the JSON shape a [ToolExecutor] expects. */
+    fun argsToJson(args: Map<String, Any?>): JsonObject = buildJsonObject {
+        for ((key, value) in args) {
+            when (value) {
+                null -> Unit // omit rather than send a null the schema rejects
+                is String -> put(key, value)
+                is Int -> put(key, value)
+                is Long -> put(key, value)
+                is Double -> put(key, value)
+                is Boolean -> put(key, value)
+                else -> put(key, value.toString())
+            }
+        }
     }
 
     /** Resolve an utterance locally, or return null to defer to the model. */

@@ -12,7 +12,16 @@
 import { Hub } from "./hub";
 import { Guard } from "./guard";
 import type { Env } from "./env";
-import { VOICE_LIMITS, parseVoiceRequest, upstreamVoiceBody } from "./voice";
+import {
+  ARABIC_MALE_VOICES,
+  VOICE_DEFAULTS,
+  VOICE_LIMITS,
+  VOICE_STYLES,
+  azureEndpoint,
+  buildSsml,
+  mapAzureError,
+  parseVoiceRequest,
+} from "./voice";
 import { HttpError, VERSION, bearer, errorResponse, json, parseToken, randomId, readJson } from "./util";
 
 export { Hub, Guard };
@@ -109,8 +118,8 @@ Every /v1 route except POST /v1/hubs, POST /v1/pair/complete and GET /health nee
   GET|POST|DELETE /v1/memory        DELETE /v1/memory/:id
   GET    /v1/audit
   POST   /v1/ai/chat/completions    relay; X-OpenRouter-Key is forwarded, never stored
-  POST   /v1/voice/tts              relay to the voice engine
-  GET    /v1/voice/voices
+  POST   /v1/voice/tts              Arabic speech, returns audio/mpeg
+  GET    /v1/voice/voices           voice catalogue + defaults
 `;
 
 export default {
@@ -144,7 +153,7 @@ export default {
             service: "jarvis-backend",
             version: VERSION,
             time: new Date().toISOString(),
-            voiceConfigured: Boolean(env.VOICE || env.VOICE_URL),
+            voiceConfigured: Boolean(env.VOICE_URL || (env.VOICE_API_KEY && env.VOICE_REGION)),
           }),
         );
       }
@@ -186,65 +195,87 @@ export default {
         );
       }
 
-      // --- voice relay -----------------------------------------------------
-      if (p.startsWith("/v1/voice/")) {
+      // --- voice: catalogue (no upstream call, no credentials needed) ------
+      if (p === "/v1/voice/voices" && req.method === "GET") {
         await relayAuth(req, env, "voice");
-        const sub = p.slice("/v1/voice".length);
-        if (!["/tts", "/tts/stream", "/voices", "/emotions", "/health"].includes(sub)) {
-          throw new HttpError(404, "not_found", "Unknown voice route");
-        }
-        if (!env.VOICE && !env.VOICE_URL) {
-          throw new HttpError(503, "voice_not_configured", "No voice engine is bound to this backend");
+        return withCors(
+          json({
+            voices: ARABIC_MALE_VOICES,
+            default: VOICE_DEFAULTS.voice,
+            defaults: { pitch: VOICE_DEFAULTS.pitch, rate: VOICE_DEFAULTS.rate },
+            styles: VOICE_STYLES,
+            // Stated plainly so no client advertises emotional synthesis.
+            styleSupport: "prosody-only",
+            configured: Boolean(env.VOICE_URL || (env.VOICE_API_KEY && env.VOICE_REGION)),
+          }),
+        );
+      }
+
+      // --- voice: synthesis ------------------------------------------------
+      if (p === "/v1/voice/tts") {
+        if (req.method !== "POST") throw new HttpError(405, "method_not_allowed", "Use POST");
+        await relayAuth(req, env, "voice");
+
+        const selfHosted = Boolean(env.VOICE_URL);
+        if (!selfHosted && !(env.VOICE_API_KEY && env.VOICE_REGION)) {
+          throw new HttpError(
+            503,
+            "voice_not_configured",
+            "Set VOICE_API_KEY and VOICE_REGION (Azure Speech), or VOICE_URL for a self-hosted engine",
+          );
         }
 
-        // /tts and /tts/stream get validated here so bad input never leaves the edge.
-        let body: BodyInit | undefined;
-        const headers = new Headers();
-        if (env.VOICE_API_KEY) headers.set("x-api-key", env.VOICE_API_KEY);
-
-        let style = "neutral";
-        if (sub.startsWith("/tts")) {
-          const v = parseVoiceRequest(await readJson(req, VOICE_LIMITS.maxBodyBytes));
-          style = v.style;
-          headers.set("content-type", "application/json");
-          body = JSON.stringify(upstreamVoiceBody(v));
-        }
-
-        const target = (env.VOICE_URL ?? "https://voice.internal") + sub + url.search;
-        const init: RequestInit = { method: req.method, headers, body };
+        // Validated at the edge so malformed input never reaches an upstream.
+        const v = parseVoiceRequest(await readJson(req, VOICE_LIMITS.maxBodyBytes));
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), VOICE_LIMITS.upstreamTimeoutMs);
+
         let upstream: Response;
         try {
-          const request = new Request(target, { ...init, signal: controller.signal });
-          upstream = env.VOICE ? await env.VOICE.fetch(request) : await fetch(request);
+          if (selfHosted) {
+            upstream = await fetch(env.VOICE_URL!, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ text: v.text, voice: v.voice, pitch: v.pitch, rate: v.rate, style: v.style }),
+              signal: controller.signal,
+            });
+          } else {
+            upstream = await fetch(azureEndpoint(env.VOICE_REGION!), {
+              method: "POST",
+              headers: {
+                "ocp-apim-subscription-key": env.VOICE_API_KEY!,
+                "content-type": "application/ssml+xml",
+                "x-microsoft-outputformat": "audio-24khz-48kbitrate-mono-mp3",
+                "user-agent": "jarvis",
+              },
+              body: buildSsml(v),
+              signal: controller.signal,
+            });
+          }
         } catch {
-          throw new HttpError(504, "voice_timeout", "Voice engine did not respond in time");
+          throw new HttpError(504, "voice_timeout", "The voice service did not respond in time");
         } finally {
           clearTimeout(timer);
         }
 
         if (!upstream.ok || !upstream.body) {
-          const err = (await upstream.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
-          const status = [400, 413, 429].includes(upstream.status) ? upstream.status : 502;
-          throw new HttpError(
-            status,
-            err.error?.code ?? "voice_upstream_error",
-            err.error?.message ?? `Voice engine error (HTTP ${upstream.status})`,
-          );
+          throw mapAzureError(upstream.status);
         }
 
-        const outHeaders = new Headers(upstream.headers);
-        outHeaders.delete("access-control-allow-origin");
-        if (sub.startsWith("/tts")) {
-          outHeaders.set("content-type", "audio/mpeg");
-          outHeaders.set("cache-control", "no-store");
-          outHeaders.set("x-voice-style", style);
-          // Be explicit: styles map to prosody, not real expressive synthesis.
-          outHeaders.set("x-voice-style-applied", "prosody-only");
-        }
-        return withCors(new Response(upstream.body, { status: upstream.status, headers: outHeaders }));
+        return withCors(
+          new Response(upstream.body, {
+            status: 200,
+            headers: {
+              "content-type": "audio/mpeg",
+              "cache-control": "no-store",
+              "x-voice": v.voice,
+              "x-voice-style": v.style,
+              // Be explicit: styles map to prosody, not expressive synthesis.
+              "x-voice-style-applied": "prosody-only",
+            },
+          }),
+        );
       }
 
       // --- AI relay (bring your own OpenRouter key) ------------------------

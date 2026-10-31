@@ -19,6 +19,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class JarvisSettings(
     val model: String = "anthropic/claude-3.5-haiku",
     val routingMode: String = "balanced", // economy | balanced | quality
+    /** "relay" for the cloud Algerian voice, "system" for the device engine. */
+    val voiceProvider: String = "relay",
     val voice: String = "ar-DZ-IsmaelNeural",
     val voicePitch: String = "-15Hz",
     val voiceRate: String = "-8%",
@@ -38,6 +40,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
         JarvisSettings(
             model = p[Keys.MODEL] ?: JarvisSettings().model,
             routingMode = p[Keys.ROUTING] ?: JarvisSettings().routingMode,
+            voiceProvider = p[Keys.VOICE_PROVIDER] ?: JarvisSettings().voiceProvider,
             voice = p[Keys.VOICE] ?: JarvisSettings().voice,
             voicePitch = p[Keys.PITCH] ?: JarvisSettings().voicePitch,
             voiceRate = p[Keys.RATE] ?: JarvisSettings().voiceRate,
@@ -53,6 +56,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setModel(value: String) = edit { it[Keys.MODEL] = value }
     suspend fun setRoutingMode(value: String) = edit { it[Keys.ROUTING] = value }
+    suspend fun setVoiceProvider(value: String) = edit { it[Keys.VOICE_PROVIDER] = value }
     suspend fun setVoice(value: String) = edit { it[Keys.VOICE] = value }
     suspend fun setPitch(value: String) = edit { it[Keys.PITCH] = value }
     suspend fun setRate(value: String) = edit { it[Keys.RATE] = value }
@@ -70,6 +74,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private object Keys {
         val MODEL = stringPreferencesKey("model")
         val ROUTING = stringPreferencesKey("routing_mode")
+        val VOICE_PROVIDER = stringPreferencesKey("voice_provider")
         val VOICE = stringPreferencesKey("voice")
         val PITCH = stringPreferencesKey("voice_pitch")
         val RATE = stringPreferencesKey("voice_rate")

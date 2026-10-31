@@ -50,7 +50,10 @@ import com.jarvis.ai.ui.theme.TextDim
 import com.jarvis.ai.ui.theme.colorFor
 
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+    onOpenSettings: () -> Unit = {},
+    viewModel: HomeViewModel = hiltViewModel(),
+) {
     val ui by viewModel.ui.collectAsState()
     val settings by viewModel.settings.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
@@ -78,6 +81,9 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = onOpenSettings) {
+                Text(stringResource(R.string.action_settings))
+            }
             Box(
                 modifier = Modifier
                     .size(10.dp)
@@ -108,11 +114,34 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                         .height(130.dp),
                 )
                 Text(
-                    text = stringResource(ui.state.statusRes),
+                    text = ui.activity ?: stringResource(ui.state.statusRes),
                     color = stateColor,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                 )
+                if (ui.tokensThisSession > 0) {
+                    Text(
+                        text = "رموز هذه الجلسة: ${ui.tokensThisSession}",
+                        color = TextDim,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+
+        ui.lastError?.let { error ->
+            Text(text = error, color = ErrorRed, style = MaterialTheme.typography.bodyMedium)
+        }
+
+        if (!ui.hasApiKey) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "لم يُضبَط مفتاح OpenRouter — الأوامر المباشرة تعمل، والأسئلة تحتاج المفتاح.",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onOpenSettings) { Text("إضافة") }
             }
         }
 
@@ -186,7 +215,10 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("سيُنفَّذ الإجراء التالي:")
                     Text(pending.description, color = TextDim)
-                    Text("الأداة: ${pending.tool}", color = TextDim)
+                    Text("الأداة: ${pending.toolName}", color = TextDim)
+                    if (pending.args.isNotEmpty()) {
+                        Text("الوسائط: ${pending.args}", color = TextDim)
+                    }
                 }
             },
             confirmButton = {

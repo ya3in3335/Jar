@@ -1,6 +1,9 @@
 package com.jarvis.ai.di
 
 import android.content.Context
+import com.jarvis.ai.core.agent.ToolRegistry
+import com.jarvis.ai.core.agent.defaultToolExecutors
+import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
 import dagger.Module
@@ -23,6 +26,19 @@ object AppModule {
     @Provides
     @Singleton
     fun settingsStore(@ApplicationContext context: Context): SettingsStore = SettingsStore(context)
+
+    @Provides
+    @Singleton
+    fun voiceEngine(
+        @ApplicationContext context: Context,
+        http: OkHttpClient,
+        secureStore: SecureStore,
+    ): VoiceEngine = VoiceEngine(context, http, secureStore)
+
+    @Provides
+    @Singleton
+    fun toolRegistry(@ApplicationContext context: Context): ToolRegistry =
+        ToolRegistry(defaultToolExecutors(context))
 
     @Provides
     @Singleton

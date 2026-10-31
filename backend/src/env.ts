@@ -10,9 +10,17 @@ export interface Env {
   /** Comma-separated allowed CORS origins, or "*". Empty disables CORS. */
   ALLOWED_ORIGINS?: string;
 
-  /** Optional voice engine: service binding preferred, URL as fallback. */
-  VOICE?: Fetcher;
-  VOICE_URL?: string;
-  /** Secret. Sent to the voice engine as x-api-key. */
+  /**
+   * Azure Speech credentials for the voice relay. Secret; set with
+   * `wrangler secret put VOICE_API_KEY`. Without them the voice routes
+   * answer 503 rather than pretending to work.
+   */
   VOICE_API_KEY?: string;
+  /** Azure region, e.g. "francecentral". */
+  VOICE_REGION?: string;
+  /**
+   * Optional override for a self-hosted voice engine that accepts the same
+   * JSON body and returns audio. Takes precedence over Azure when set.
+   */
+  VOICE_URL?: string;
 }
