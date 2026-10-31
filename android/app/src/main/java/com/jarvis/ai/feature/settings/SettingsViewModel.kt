@@ -7,8 +7,10 @@ import com.jarvis.ai.core.audio.VoiceOption
 import com.jarvis.ai.core.data.JarvisSettings
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
+import com.jarvis.ai.core.audio.AzureTtsProvider
 import com.jarvis.ai.core.net.JarvisBackend
 import com.jarvis.ai.core.net.ModelCapabilities
+import com.jarvis.ai.core.stt.AutoSttSessionProvider
 import com.jarvis.ai.core.net.OpenRouterClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +33,9 @@ data class SettingsUiState(
     val voices: List<VoiceOption> = emptyList(),
     val sttLanguages: List<JarvisBackend.Language> = emptyList(),
     val backendPaired: Boolean = false,
+    val hasDeepgramKey: Boolean = false,
+    val hasAzureKey: Boolean = false,
+    val azureRegion: String = "",
     val sttCheck: String? = null,
     val sttCheckOk: Boolean? = null,
     val speaking: Boolean = false,
@@ -44,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     private val openRouter: OpenRouterClient,
     private val voice: VoiceEngine,
     private val backend: JarvisBackend,
+    private val sessions: AutoSttSessionProvider,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(
@@ -51,6 +57,9 @@ class SettingsViewModel @Inject constructor(
             hasApiKey = !secureStore.openRouterKey.isNullOrBlank(),
             secureStorageAvailable = secureStore.isAvailable,
             backendPaired = backend.isPaired,
+            hasDeepgramKey = !secureStore.deepgramKey.isNullOrBlank(),
+            hasAzureKey = !secureStore.azureSpeechKey.isNullOrBlank(),
+            azureRegion = secureStore.azureRegion.orEmpty(),
         ),
     )
     val ui: StateFlow<SettingsUiState> = _ui.asStateFlow()
@@ -121,11 +130,64 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    // -------------------------------------------- keys for the no-server mode
+
+    fun saveDeepgramKey(key: String) {
+        val trimmed = key.trim()
+        if (trimmed.isEmpty()) return
+        if (!secureStore.isAvailable) {
+            _ui.value = _ui.value.copy(notice = "التخزين المشفّر غير متاح، فلن يُحفَظ المفتاح")
+            return
+        }
+        secureStore.deepgramKey = trimmed
+        _ui.value = _ui.value.copy(
+            hasDeepgramKey = true,
+            notice = "حُفظ مفتاح ديبڨرام مشفّرًا على هذا الجهاز",
+            sttCheck = null,
+        )
+    }
+
+    fun clearDeepgramKey() {
+        secureStore.deepgramKey = null
+        _ui.value = _ui.value.copy(hasDeepgramKey = false, sttCheck = null)
+    }
+
+    fun saveAzureCredentials(key: String, region: String) {
+        val trimmedKey = key.trim()
+        val trimmedRegion = region.trim().lowercase()
+        if (trimmedKey.isEmpty() || trimmedRegion.isEmpty()) {
+            _ui.value = _ui.value.copy(notice = "المفتاح والمنطقة مطلوبان معًا")
+            return
+        }
+        if (!secureStore.isAvailable) {
+            _ui.value = _ui.value.copy(notice = "التخزين المشفّر غير متاح، فلن يُحفَظ المفتاح")
+            return
+        }
+        secureStore.azureSpeechKey = trimmedKey
+        secureStore.azureRegion = trimmedRegion
+        _ui.value = _ui.value.copy(
+            hasAzureKey = true,
+            azureRegion = trimmedRegion,
+            notice = "حُفظت بيانات أزور مشفّرة على هذا الجهاز",
+        )
+        loadVoices()
+    }
+
+    fun clearAzureCredentials() {
+        secureStore.azureSpeechKey = null
+        secureStore.azureRegion = null
+        _ui.value = _ui.value.copy(hasAzureKey = false, azureRegion = "")
+    }
+
     // ------------------------------------------------- speech recognition
 
     fun loadSttLanguages() {
         viewModelScope.launch {
-            _ui.value = _ui.value.copy(sttLanguages = backend.sttLanguages(), backendPaired = backend.isPaired)
+            val fromBackend = if (backend.isPaired) backend.sttLanguages() else emptyList()
+            _ui.value = _ui.value.copy(
+                sttLanguages = fromBackend.ifEmpty { BUILT_IN_LANGUAGES },
+                backendPaired = backend.isPaired,
+            )
         }
     }
 
@@ -139,14 +201,16 @@ class SettingsViewModel @Inject constructor(
     fun testRecognition() {
         _ui.value = _ui.value.copy(sttCheck = null, sttCheckOk = null)
         viewModelScope.launch {
-            val result = runCatching { backend.sttSession(settings.value.sttLanguage) }
+            val result = runCatching { sessions.session(settings.value.sttLanguage) }
             _ui.value = result.fold(
                 onSuccess = { session ->
                     if (session.isUsable) {
-                        _ui.value.copy(
-                            sttCheckOk = true,
-                            sttCheck = "جاهز — رمز صالح ${session.expiresInSeconds} ثانية",
-                        )
+                        val how = if (sessions.mode == "backend") {
+                            "عبر الخادم، رمز صالح ${session.expiresInSeconds} ثانية"
+                        } else {
+                            "مباشرة بمفتاح هذا الجهاز"
+                        }
+                        _ui.value.copy(sttCheckOk = true, sttCheck = "جاهز — $how")
                     } else {
                         _ui.value.copy(sttCheckOk = false, sttCheck = "الخادم أرجع رمزًا غير صالح")
                     }
@@ -213,6 +277,16 @@ class SettingsViewModel @Inject constructor(
     fun setMaxToolCalls(value: Int) = viewModelScope.launch { settingsStore.setMaxToolCalls(value.coerceIn(1, 20)) }
     fun setMaxOutputTokens(value: Int) =
         viewModelScope.launch { settingsStore.setMaxOutputTokens(value.coerceIn(128, 8192)) }
+
+    /** Offered when no backend is paired, so the picker is never empty. */
+    private val BUILT_IN_LANGUAGES = listOf(
+        JarvisBackend.Language("ar", "العربية", "تشمل اللهجات المغاربية"),
+        JarvisBackend.Language("multi", "متعدّد اللغات", "عربي وإنجليزي وفرنسي معًا"),
+        JarvisBackend.Language("en", "الإنجليزية", ""),
+        JarvisBackend.Language("fr", "الفرنسية", ""),
+    )
+
+    val azureVoices = AzureTtsProvider.ARABIC_VOICES
 
     fun dismissNotice() {
         _ui.value = _ui.value.copy(notice = null)

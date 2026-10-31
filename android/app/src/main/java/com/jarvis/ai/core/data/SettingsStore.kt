@@ -23,8 +23,12 @@ data class JarvisSettings(
     val sttEngine: String = "deepgram",
     /** Recognition language: "ar", "multi", "en", "fr". */
     val sttLanguage: String = "ar",
-    /** "relay" for the cloud Algerian voice, "system" for the device engine. */
-    val voiceProvider: String = "relay",
+    /**
+     * "azure" talks to Azure directly with a key on this device (no server
+     * needed), "relay" goes through a paired backend, "system" is the
+     * phone's own engine.
+     */
+    val voiceProvider: String = "azure",
     val voice: String = "ar-DZ-IsmaelNeural",
     val voicePitch: String = "-15Hz",
     val voiceRate: String = "-8%",

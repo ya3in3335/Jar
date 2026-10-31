@@ -2,7 +2,6 @@ package com.jarvis.ai.core.stt
 
 import android.util.Log
 import com.jarvis.ai.core.audio.AudioCapture
-import com.jarvis.ai.core.net.JarvisBackend
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -35,7 +34,7 @@ import javax.inject.Singleton
 @Singleton
 class DeepgramStt @Inject constructor(
     private val http: OkHttpClient,
-    private val backend: JarvisBackend,
+    private val sessions: SttSessionProvider,
     private val capture: AudioCapture,
 ) : SttEngine {
 
@@ -46,7 +45,7 @@ class DeepgramStt @Inject constructor(
 
     override fun listen(language: String): Flow<SttEvent> = callbackFlow {
         val session = try {
-            backend.sttSession(language)
+            sessions.session(language)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -71,8 +70,9 @@ class DeepgramStt @Inject constructor(
 
         val request = Request.Builder()
             .url(session.url)
-            // A temporary token, not the account key.
-            .header("Authorization", "Bearer ${session.accessToken}")
+            // Bearer for a minted token, Token for a raw account key:
+            // the wrong scheme fails the handshake with a bare 401.
+            .header("Authorization", authHeaderFor(session))
             .build()
 
         val listener = object : WebSocketListener() {

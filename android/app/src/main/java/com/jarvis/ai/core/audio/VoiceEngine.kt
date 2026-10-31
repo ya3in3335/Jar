@@ -25,6 +25,7 @@ class VoiceEngine @Inject constructor(
 ) {
 
     private val system = SystemTtsProvider(context)
+    private val azure = AzureTtsProvider(http, secureStore, context.cacheDir)
     private val relay = RelayTtsProvider(http, secureStore, context.cacheDir)
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -32,8 +33,14 @@ class VoiceEngine @Inject constructor(
 
     @Volatile private var active: TtsProvider? = null
 
-    /** Providers for the settings picker, best first. */
-    val providers: List<TtsProvider> get() = listOf(relay, system)
+    /**
+     * Providers for the settings picker, best first.
+     *
+     * Azure-direct leads because the no-server setup is the default: it
+     * gives the Algerian neural voice with only a key. The relay is for a
+     * paired backend, and the device engine always works as a last resort.
+     */
+    val providers: List<TtsProvider> get() = listOf(azure, relay, system)
 
     suspend fun availableProviders(): List<TtsProvider> = providers.filter { it.isAvailable() }
 
@@ -55,9 +62,10 @@ class VoiceEngine @Inject constructor(
         if (text.isBlank()) return SpokenBy("none", false)
 
         val ordered = when (preferredProviderId) {
-            "system" -> listOf(system, relay)
-            "relay" -> listOf(relay, system)
-            else -> listOf(relay, system)
+            "system" -> listOf(system, azure, relay)
+            "azure" -> listOf(azure, relay, system)
+            "relay" -> listOf(relay, azure, system)
+            else -> listOf(azure, relay, system)
         }
 
         requestFocus()

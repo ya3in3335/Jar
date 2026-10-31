@@ -212,12 +212,44 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
+            var deepgramInput by rememberSaveable { mutableStateOf("") }
+
+            Text(
+                if (ui.backendPaired) {
+                    "الجهاز مقترن بخادم، فالمفتاح يبقى عليه ولا ينزل إلى الهاتف."
+                } else {
+                    "بلا خادم: المفتاح يُحفَظ على هذا الهاتف مشفّرًا بـ Keystore. " +
+                        "لا تشارك الـ APK بعد إدخاله."
+                },
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
             if (!ui.backendPaired) {
-                Text(
-                    "الجهاز غير مقترن بالخادم — التعرّف المباشر يحتاج الإقران ليصدر الخادم رمزًا مؤقّتًا.",
-                    color = WarnAmber,
-                    style = MaterialTheme.typography.bodyMedium,
+                if (ui.hasDeepgramKey) {
+                    Text("مفتاح ديبڨرام محفوظ ✓", color = SuccessGreen, style = MaterialTheme.typography.bodyMedium)
+                }
+                OutlinedTextField(
+                    value = deepgramInput,
+                    onValueChange = { deepgramInput = it },
+                    label = { Text("مفتاح ديبڨرام") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            viewModel.saveDeepgramKey(deepgramInput)
+                            deepgramInput = ""
+                        },
+                        enabled = deepgramInput.isNotBlank(),
+                    ) { Text("حفظ") }
+                    if (ui.hasDeepgramKey) {
+                        TextButton(onClick = viewModel::clearDeepgramKey) { Text("حذف", color = ErrorRed) }
+                    }
+                }
             }
 
             if (ui.sttLanguages.isNotEmpty()) {
@@ -239,7 +271,10 @@ fun SettingsScreen(
                 }
             }
 
-            OutlinedButton(onClick = viewModel::testRecognition, enabled = ui.backendPaired) {
+            OutlinedButton(
+                onClick = viewModel::testRecognition,
+                enabled = ui.backendPaired || ui.hasDeepgramKey,
+            ) {
                 Text("اختبار الاتصال بالتعرّف")
             }
 
@@ -256,9 +291,14 @@ fun SettingsScreen(
         Section(title = stringRes(R.string.settings_voice)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
+                    selected = settings.voiceProvider == "azure",
+                    onClick = { viewModel.setVoiceProvider("azure") },
+                    label = { Text("إسماعيل (أزور مباشرة)") },
+                )
+                FilterChip(
                     selected = settings.voiceProvider == "relay",
                     onClick = { viewModel.setVoiceProvider("relay") },
-                    label = { Text("صوت إسماعيل (سحابي)") },
+                    label = { Text("عبر الخادم") },
                 )
                 FilterChip(
                     selected = settings.voiceProvider == "system",
@@ -268,7 +308,9 @@ fun SettingsScreen(
             }
 
             Text(
-                if (settings.voiceProvider == "relay") {
+                if (settings.voiceProvider == "azure") {
+                    "يتّصل بأزور مباشرة بمفتاحك. إن تعذّر، ينطق محرّك الهاتف تلقائيًا."
+                } else if (settings.voiceProvider == "relay") {
                     "يحتاج إقران الجهاز بالخادم. إن تعذّر، ينطق محرّك الهاتف تلقائيًا."
                 } else {
                     "يعمل بلا إنترنت، وجودته تتبع الأصوات العربية المثبّتة على هاتفك."
@@ -276,6 +318,49 @@ fun SettingsScreen(
                 color = TextDim,
                 style = MaterialTheme.typography.bodyMedium,
             )
+
+            if (settings.voiceProvider == "azure" && !ui.backendPaired) {
+                var azureKeyInput by rememberSaveable { mutableStateOf("") }
+                var azureRegionInput by rememberSaveable { mutableStateOf(ui.azureRegion) }
+
+                if (ui.hasAzureKey) {
+                    Text(
+                        "مفتاح أزور محفوظ ✓ (${ui.azureRegion})",
+                        color = SuccessGreen,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                OutlinedTextField(
+                    value = azureKeyInput,
+                    onValueChange = { azureKeyInput = it },
+                    label = { Text("مفتاح أزور للكلام") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = azureRegionInput,
+                    onValueChange = { azureRegionInput = it },
+                    label = { Text("المنطقة") },
+                    placeholder = { Text("francecentral", color = TextDim) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            viewModel.saveAzureCredentials(azureKeyInput, azureRegionInput)
+                            azureKeyInput = ""
+                        },
+                        enabled = azureKeyInput.isNotBlank() && azureRegionInput.isNotBlank(),
+                    ) { Text("حفظ") }
+                    if (ui.hasAzureKey) {
+                        TextButton(onClick = viewModel::clearAzureCredentials) { Text("حذف", color = ErrorRed) }
+                    }
+                }
+            }
 
             if (ui.voices.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

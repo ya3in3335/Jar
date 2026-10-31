@@ -6,8 +6,12 @@ import com.jarvis.ai.core.agent.defaultToolExecutors
 import com.jarvis.ai.core.audio.AudioCapture
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.net.JarvisBackend
+import com.jarvis.ai.core.stt.AutoSttSessionProvider
+import com.jarvis.ai.core.stt.BackendSttSessionProvider
 import com.jarvis.ai.core.stt.DeepgramStt
+import com.jarvis.ai.core.stt.DirectSttSessionProvider
 import com.jarvis.ai.core.stt.SttEngine
+import com.jarvis.ai.core.stt.SttSessionProvider
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
 import dagger.Module
@@ -42,8 +46,23 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun sttEngine(http: OkHttpClient, backend: JarvisBackend, capture: AudioCapture): SttEngine =
-        DeepgramStt(http, backend, capture)
+    fun sttSessions(
+        secureStore: SecureStore,
+        backend: JarvisBackend,
+    ): AutoSttSessionProvider = AutoSttSessionProvider(
+        direct = DirectSttSessionProvider(secureStore),
+        backend = BackendSttSessionProvider(backend),
+        jarvisBackend = backend,
+        secureStore = secureStore,
+    )
+
+    @Provides
+    @Singleton
+    fun sttEngine(
+        http: OkHttpClient,
+        sessions: AutoSttSessionProvider,
+        capture: AudioCapture,
+    ): SttEngine = DeepgramStt(http, sessions as SttSessionProvider, capture)
 
     @Provides
     @Singleton

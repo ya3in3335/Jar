@@ -53,6 +53,24 @@ class SecureStore @Inject constructor(context: Context) {
         get() = prefs?.getString(KEY_BACKEND_URL, null)
         set(value) = put(KEY_BACKEND_URL, value)
 
+    /**
+     * Keys for running with no backend at all. They are encrypted at rest
+     * with an Android Keystore key, so the bytes on disk are useless off
+     * this device — but a key on a phone is only as private as the phone,
+     * so none of these is ever compiled into the APK.
+     */
+    var deepgramKey: String?
+        get() = prefs?.getString(KEY_DEEPGRAM, null)
+        set(value) = put(KEY_DEEPGRAM, value)
+
+    var azureSpeechKey: String?
+        get() = prefs?.getString(KEY_AZURE_KEY, null)
+        set(value) = put(KEY_AZURE_KEY, value)
+
+    var azureRegion: String?
+        get() = prefs?.getString(KEY_AZURE_REGION, null)
+        set(value) = put(KEY_AZURE_REGION, value)
+
     fun clear() {
         prefs?.edit()?.clear()?.apply()
     }
@@ -69,6 +87,9 @@ class SecureStore @Inject constructor(context: Context) {
         const val KEY_OPENROUTER = "openrouter_api_key"
         const val KEY_DEVICE_TOKEN = "device_token"
         const val KEY_BACKEND_URL = "backend_url"
+        const val KEY_DEEPGRAM = "deepgram_api_key"
+        const val KEY_AZURE_KEY = "azure_speech_key"
+        const val KEY_AZURE_REGION = "azure_speech_region"
     }
 }
 
@@ -76,3 +97,5 @@ class SecureStore @Inject constructor(context: Context) {
 fun redact(text: String): String = text
     .replace(Regex("jv1\\.[a-z2-9]{12}\\.[a-z2-9]{10}\\.[A-Za-z0-9_-]+"), "jv1.***")
     .replace(Regex("sk-or-[A-Za-z0-9_-]{6,}"), "sk-or-***")
+    // Deepgram and Azure keys are bare hex, so they are matched by shape.
+    .replace(Regex("\\b[0-9a-f]{32,40}\\b"), "***")
