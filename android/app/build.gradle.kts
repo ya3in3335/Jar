@@ -62,6 +62,9 @@ android {
     lint {
         warningsAsErrors = false
         abortOnError = true
+        // Print findings to stdout: the raw CI log is not reachable from the
+        // dev sandbox, so the text report is what makes them visible.
+        textReport = true
         disable += setOf("MissingTranslation")
     }
 }

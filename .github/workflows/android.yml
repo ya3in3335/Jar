@@ -81,8 +81,9 @@ jobs:
         run: |
           set -o pipefail
           gradle :app:lintDebug --no-daemon --console=plain 2>&1 | tee /tmp/lint.log || {
-            grep -E "^e: |Error:|error: |^> |Lint found|Caused by:" /tmp/lint.log | head -30 \
-              | while IFS= read -r line; do echo "::warning::$line"; done
+            # Match lint's own report lines, not Gradle's task chatter.
+            grep -E ": (Error|Warning): |[0-9]+ errors?, [0-9]+ warnings?" /tmp/lint.log \
+              | head -30 | while IFS= read -r line; do echo "::warning::$line"; done
             exit 1
           }
 
