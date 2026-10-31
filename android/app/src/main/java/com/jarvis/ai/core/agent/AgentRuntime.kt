@@ -67,13 +67,20 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
         model: String,
         instruction: String,
         registry: ToolRegistry,
+        /**
+         * The language replies must be written in.
+         *
+         * It follows the chosen voice: an English voice reading Arabic
+         * script produces noise, so the two cannot disagree.
+         */
+        replyLanguage: String = "ar",
         history: List<ChatMessage> = emptyList(),
         limits: Limits = Limits(),
         confirm: suspend (Tool, JsonObject) -> Boolean = { _, _ -> true },
         onEvent: (Event) -> Unit = {},
     ): Outcome {
         val messages = buildList {
-            add(ChatMessage.System(systemPrompt(registry)))
+            add(ChatMessage.System(systemPrompt(registry, replyLanguage)))
             addAll(history)
             add(ChatMessage.User(instruction))
         }.toMutableList()
@@ -194,11 +201,16 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
      * tools, claiming an action succeeded without running it, and answering
      * in a language other than the user's.
      */
-    private fun systemPrompt(registry: ToolRegistry): String = buildString {
+    private fun systemPrompt(registry: ToolRegistry, replyLanguage: String): String = buildString {
         appendLine("أنت جارفيس، مساعد شخصي يعمل على هاتف أندرويد يملكه المستخدم.")
         appendLine()
         appendLine("القواعد:")
-        appendLine("- تحدّث بالعربية دائمًا، بإيجاز وبلا حشو.")
+        if (replyLanguage == "en") {
+            // The voice is English, so the text must be too.
+            appendLine("- Reply in English only, briefly and without filler, even if asked in Arabic.")
+        } else {
+            appendLine("- تحدّث بالعربية دائمًا، بإيجاز وبلا حشو.")
+        }
         appendLine("- لتنفيذ أي إجراء على الهاتف استخدم الأدوات المتاحة فقط. لا تخترع أداة.")
         appendLine("- لا تقل إنك نفّذت شيئًا قبل أن تُرجع الأداة نجاحًا فعليًا.")
         appendLine("- إن فشلت أداة، اذكر السبب كما ورد ولا تتظاهر بالنجاح.")

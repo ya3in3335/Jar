@@ -296,6 +296,14 @@ fun SettingsScreen(
                     label = { Text("إسماعيل (أزور مباشرة)") },
                 )
                 FilterChip(
+                    selected = settings.voiceProvider == "deepgram",
+                    onClick = {
+                        viewModel.setVoiceProvider("deepgram")
+                        viewModel.setVoice("aura-2-thalia-en")
+                    },
+                    label = { Text("ديبڨرام (إنجليزي)") },
+                )
+                FilterChip(
                     selected = settings.voiceProvider == "relay",
                     onClick = { viewModel.setVoiceProvider("relay") },
                     label = { Text("عبر الخادم") },
@@ -308,7 +316,11 @@ fun SettingsScreen(
             }
 
             Text(
-                if (settings.voiceProvider == "azure") {
+                if (settings.voiceProvider == "deepgram") {
+                    "أصوات ديبڨرام إنجليزية — لا يملك أي صوت عربي. " +
+                        "لذلك سيردّ جارفيس بالإنجليزية أيضًا، لأن صوتًا إنجليزيًا يقرأ نصًّا عربيًا يخرج كلامًا مشوّهًا. " +
+                        "يستعمل نفس مفتاح ديبڨرام، ودرجة الصوت وسرعته تُطبَّقان عند التشغيل."
+                } else if (settings.voiceProvider == "azure") {
                     "يتّصل بأزور مباشرة بمفتاحك. إن تعذّر، ينطق محرّك الهاتف تلقائيًا."
                 } else if (settings.voiceProvider == "relay") {
                     "يحتاج إقران الجهاز بالخادم. إن تعذّر، ينطق محرّك الهاتف تلقائيًا."

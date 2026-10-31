@@ -26,6 +26,7 @@ class VoiceEngine @Inject constructor(
 
     private val system = SystemTtsProvider(context)
     private val azure = AzureTtsProvider(http, secureStore, context.cacheDir)
+    private val deepgram = DeepgramTtsProvider(http, secureStore, context.cacheDir)
     private val relay = RelayTtsProvider(http, secureStore, context.cacheDir)
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -40,7 +41,7 @@ class VoiceEngine @Inject constructor(
      * gives the Algerian neural voice with only a key. The relay is for a
      * paired backend, and the device engine always works as a last resort.
      */
-    val providers: List<TtsProvider> get() = listOf(azure, relay, system)
+    val providers: List<TtsProvider> get() = listOf(azure, deepgram, relay, system)
 
     suspend fun availableProviders(): List<TtsProvider> = providers.filter { it.isAvailable() }
 
@@ -62,10 +63,11 @@ class VoiceEngine @Inject constructor(
         if (text.isBlank()) return SpokenBy("none", false)
 
         val ordered = when (preferredProviderId) {
-            "system" -> listOf(system, azure, relay)
-            "azure" -> listOf(azure, relay, system)
-            "relay" -> listOf(relay, azure, system)
-            else -> listOf(azure, relay, system)
+            "system" -> listOf(system, azure, deepgram, relay)
+            "azure" -> listOf(azure, relay, deepgram, system)
+            "deepgram" -> listOf(deepgram, azure, system)
+            "relay" -> listOf(relay, azure, deepgram, system)
+            else -> listOf(azure, deepgram, relay, system)
         }
 
         requestFocus()
