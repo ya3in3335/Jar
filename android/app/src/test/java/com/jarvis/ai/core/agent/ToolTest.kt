@@ -172,9 +172,18 @@ class IntentArgsTest {
 
     @Test
     fun `compound command carries its search term`() {
-        val routed = IntentRouter.route("افتح يوتيوب وابحث عن قرآن")!!
+        val routed = IntentRouter.route("افتح يوتيوب وابحث عن بايثون")!!
         val encoded = IntentRouter.argsToJson(routed.args)
         assertEquals("youtube", encoded["app"]?.jsonPrimitive?.content)
-        assertTrue(encoded["search"]?.jsonPrimitive?.content!!.contains("قرآن"))
+        assertTrue(encoded["search"]?.jsonPrimitive?.content!!.contains("بايثون"))
+    }
+
+    @Test
+    fun `the search term reaches the tool in normalised form`() {
+        // Routing folds Arabic orthography, so "قرآن" is carried as "قران".
+        // Callers that compare against the user's raw spelling will miss.
+        val routed = IntentRouter.route("افتح يوتيوب وابحث عن قرآن")!!
+        val search = IntentRouter.argsToJson(routed.args)["search"]?.jsonPrimitive?.content
+        assertEquals("قران", search)
     }
 }
