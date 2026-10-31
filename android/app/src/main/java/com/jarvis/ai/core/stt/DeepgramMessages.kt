@@ -53,15 +53,14 @@ object DeepgramMessages {
         // Emitting those as a turn would run the agent on nothing.
         if (text.isEmpty()) return null
 
-        // speech_final means the endpointer decided the sentence closed.
-        // is_final alone only means this segment will not be revised, which
-        // is not the same as the speaker having finished.
-        return if (speechFinal) {
-            SttEvent.Final(text, alternative["confidence"]?.jsonPrimitive?.floatOrNull)
-        } else if (isFinal) {
-            SttEvent.Partial(text)
-        } else {
-            SttEvent.Partial(text)
+        // Three distinct cases, and conflating the middle two loses words:
+        //   speech_final  -> the endpointer closed the sentence
+        //   is_final only -> this segment is settled, the speaker continues
+        //   neither       -> an interim guess, to be replaced
+        return when {
+            speechFinal -> SttEvent.Final(text, alternative["confidence"]?.jsonPrimitive?.floatOrNull)
+            isFinal -> SttEvent.Segment(text)
+            else -> SttEvent.Partial(text)
         }
     }
 

@@ -31,8 +31,16 @@ sealed interface SttEvent {
     /** The speaker started. Used to interrupt playback (barge-in). */
     data object SpeechStarted : SttEvent
 
-    /** Words so far. Replaced by later interim results, then by a final. */
+    /** Words so far. Replaced by later interim results. */
     data class Partial(val text: String) : SttEvent
+
+    /**
+     * A segment the recogniser will not revise, in an utterance that is
+     * still going. It must be kept: treating it as a partial loses it when
+     * the next segment arrives, which eats the first half of any sentence
+     * Deepgram closes in pieces.
+     */
+    data class Segment(val text: String) : SttEvent
 
     /** A completed utterance. This is what gets acted on. */
     data class Final(val text: String, val confidence: Float?) : SttEvent

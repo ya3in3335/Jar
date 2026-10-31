@@ -319,8 +319,14 @@ class HomeViewModel @Inject constructor(
                 go(AssistantState.LISTENING)
             }
 
-            is SttEvent.Partial ->
-                _ui.value = _ui.value.copy(transcript = event.text, activity = "أسمعك...")
+            is SttEvent.Partial, is SttEvent.Segment -> {
+                val text = when (event) {
+                    is SttEvent.Partial -> event.text
+                    is SttEvent.Segment -> event.text
+                    else -> return
+                }
+                _ui.value = _ui.value.copy(transcript = text, activity = "أسمعك...")
+            }
 
             is SttEvent.Final -> {
                 _ui.value = _ui.value.copy(transcript = event.text, activity = null)

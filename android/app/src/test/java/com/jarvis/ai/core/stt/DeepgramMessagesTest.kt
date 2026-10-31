@@ -38,11 +38,12 @@ class DeepgramParsingTest {
     }
 
     @Test
-    fun `is_final without speech_final is still only a partial`() {
-        // is_final means this segment will not be revised. It does NOT mean
-        // the speaker stopped, so acting on it would cut people off.
+    fun `is_final without speech_final is a settled segment, not a turn`() {
+        // It must not be a Partial (the next segment would wipe it) and
+        // must not be a Final (the speaker has not stopped).
         val event = DeepgramMessages.parse(results("افتح يوتيوب", isFinal = true, speechFinal = false))
-        assertTrue(event is SttEvent.Partial)
+        assertTrue(event is SttEvent.Segment)
+        assertEquals("افتح يوتيوب", (event as SttEvent.Segment).text)
     }
 
     @Test
@@ -187,12 +188,22 @@ class TurnAssemblerTest {
         )) {
             when (val event = DeepgramMessages.parse(message)) {
                 is SttEvent.Partial -> turn.partial(event.text)
+                is SttEvent.Segment -> turn.commit(event.text)
                 is SttEvent.Final -> turn.commit(event.text)
                 else -> Unit
             }
         }
-        assertEquals("وابحث عن بايثون", turn.text.takeLast(17))
-        assertTrue(turn.text.contains("يوتيوب"))
+        // Both halves survive: the settled segment and the closing one.
+        assertEquals("افتح يوتيوب وابحث عن بايثون", turn.text)
+    }
+
+    @Test
+    fun `a settled segment survives the segment that follows it`() {
+        val turn = DeepgramMessages.TurnAssembler()
+        turn.commit("افتح يوتيوب")
+        turn.partial("وابح")
+        turn.commit("وابحث عن بايثون")
+        assertEquals("افتح يوتيوب وابحث عن بايثون", turn.text)
     }
 }
 

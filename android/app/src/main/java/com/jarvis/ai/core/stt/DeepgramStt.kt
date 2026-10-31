@@ -89,6 +89,12 @@ class DeepgramStt @Inject constructor(
                         trySend(SttEvent.Partial(assembler.text))
                     }
 
+                    is SttEvent.Segment -> {
+                        assembler.commit(event.text)
+                        // Show the sentence growing; the turn is not over.
+                        trySend(SttEvent.Partial(assembler.text))
+                    }
+
                     is SttEvent.Final -> {
                         assembler.commit(event.text)
                         // Deepgram closed the sentence; hand it over whole.
