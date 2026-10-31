@@ -39,6 +39,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -52,6 +57,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -78,6 +84,13 @@ fun HomeScreen(
     val settings by viewModel.settings.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
     var keyboardOpen by rememberSaveable { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) viewModel.toggleMic(true) else viewModel.onMicPermissionDenied()
+    }
 
     val accent by animateColorAsState(
         targetValue = colorFor(ui.state),
@@ -206,7 +219,16 @@ fun HomeScreen(
                 input = ""
                 keyboardOpen = false
             },
-            onMic = { viewModel.toggleMic(!ui.micOn) },
+            onMic = {
+                when {
+                    ui.micOn -> viewModel.toggleMic(false)
+
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                        PackageManager.PERMISSION_GRANTED -> viewModel.toggleMic(true)
+
+                    else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            },
             onCancel = viewModel::cancel,
         )
 

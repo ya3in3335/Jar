@@ -8,6 +8,7 @@ import com.jarvis.ai.core.agent.IntentRouter
 import com.jarvis.ai.core.agent.Tool
 import com.jarvis.ai.core.agent.ToolRegistry
 import com.jarvis.ai.core.agent.canGoTo
+import com.jarvis.ai.core.audio.AmplitudeMeter
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.data.JarvisSettings
 import com.jarvis.ai.core.data.SecureStore
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -52,6 +55,7 @@ class HomeViewModel @Inject constructor(
     private val agent: AgentRuntime,
     private val registry: ToolRegistry,
     private val voice: VoiceEngine,
+    private val meter: AmplitudeMeter,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(
@@ -69,6 +73,7 @@ class HomeViewModel @Inject constructor(
     private val history = mutableListOf<ChatMessage>()
 
     private var runJob: Job? = null
+    private var meterJob: Job? = null
     private var confirmation: CompletableDeferred<Boolean>? = null
 
     fun refreshKeyState() {
@@ -256,12 +261,47 @@ class HomeViewModel @Inject constructor(
     fun toggleMic(on: Boolean) {
         _ui.value = _ui.value.copy(micOn = on)
         go(if (on) AssistantState.LISTENING else AssistantState.IDLE)
+        if (on) startMeter() else stopMeter()
+    }
+
+    /** Needs permission: report honestly instead of showing a dead orb. */
+    fun onMicPermissionDenied() {
+        _ui.value = _ui.value.copy(
+            micOn = false,
+            lastError = "إذن الميكروفون مرفوض، فلا يمكن قياس الصوت",
+        )
+        go(AssistantState.IDLE)
+    }
+
+    private fun startMeter() {
+        meterJob?.cancel()
+        if (!meter.hasPermission()) {
+            onMicPermissionDenied()
+            return
+        }
+        meterJob = viewModelScope.launch {
+            meter.levels()
+                .catch { e ->
+                    _ui.value = _ui.value.copy(
+                        lastError = "تعذّر فتح الميكروفون: ${e.javaClass.simpleName}",
+                        micOn = false,
+                    )
+                }
+                .collect { level -> _ui.value = _ui.value.copy(amplitude = level) }
+        }
+    }
+
+    private fun stopMeter() {
+        meterJob?.cancel()
+        meterJob = null
+        _ui.value = _ui.value.copy(amplitude = 0f)
     }
 
     /** Always permitted: an action the user cannot abort is a bug. */
     fun cancel() {
         runJob?.cancel()
         runJob = null
+        stopMeter()
         confirmation?.complete(false)
         voice.stop()
         _ui.value = _ui.value.copy(micOn = false, pendingConfirmation = null, activity = null)
@@ -281,6 +321,7 @@ class HomeViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        stopMeter()
         voice.stop()
         super.onCleared()
     }

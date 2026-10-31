@@ -3,6 +3,7 @@ package com.jarvis.ai.di
 import android.content.Context
 import com.jarvis.ai.core.agent.ToolRegistry
 import com.jarvis.ai.core.agent.defaultToolExecutors
+import com.jarvis.ai.core.audio.AmplitudeMeter
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
@@ -26,6 +27,11 @@ object AppModule {
     @Provides
     @Singleton
     fun settingsStore(@ApplicationContext context: Context): SettingsStore = SettingsStore(context)
+
+    @Provides
+    @Singleton
+    fun amplitudeMeter(@ApplicationContext context: Context): AmplitudeMeter =
+        AmplitudeMeter(context)
 
     @Provides
     @Singleton
