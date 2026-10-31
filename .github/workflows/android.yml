@@ -15,6 +15,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # to publish the APK as a release asset
     defaults:
       run:
         working-directory: android
@@ -72,9 +74,17 @@ jobs:
             exit 1
           }
 
+      # Does not block the APK, but surfaces findings as annotations so they
+      # are visible without reading the raw run log.
       - name: Lint
         continue-on-error: true
-        run: gradle :app:lintDebug --no-daemon --console=plain
+        run: |
+          set -o pipefail
+          gradle :app:lintDebug --no-daemon --console=plain 2>&1 | tee /tmp/lint.log || {
+            grep -E "^e: |Error:|error: |^> |Lint found|Caused by:" /tmp/lint.log | head -30 \
+              | while IFS= read -r line; do echo "::warning::$line"; done
+            exit 1
+          }
 
       # Fail loudly rather than publishing an empty artifact.
       - name: Verify the APK
@@ -95,7 +105,33 @@ jobs:
           sha256sum JARVIS-debug.apk | tee JARVIS-debug.apk.sha256
           echo "::notice::sha256 $(cut -d' ' -f1 < JARVIS-debug.apk.sha256)"
 
-      - name: Upload APK
+      # Actions artifacts need a GitHub login and arrive zipped, which is
+      # awkward on a phone. A release asset is a plain link you can open in
+      # the phone browser and install directly.
+      - name: Publish the APK as a rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha=$(cut -d' ' -f1 < JARVIS-debug.apk.sha256)
+          size=$(( $(stat -c%s JARVIS-debug.apk) / 1024 / 1024 ))
+          gh release delete android-debug --yes --cleanup-tag 2>/dev/null || true
+          gh release create android-debug \
+            JARVIS-debug.apk JARVIS-debug.apk.sha256 \
+            --title "JARVIS Android (debug)" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --notes "نسخة تجريبية (debug) مبنية آليًا من \`${GITHUB_SHA:0:7}\`.
+
+          الحجم: ${size} ميغابايت
+          SHA-256: \`${sha}\`
+
+          للتثبيت: نزّل \`JARVIS-debug.apk\` ثم اسمح بتثبيت التطبيقات من هذا المصدر.
+
+          هذه النسخة أساس فقط: الصوت والتعرّف على الكلام ومنظومة الوكيل غير منفّذة بعد — انظر \`docs/BUILD_STATUS.md\`."
+          echo "::notice::https://github.com/${GITHUB_REPOSITORY}/releases/download/android-debug/JARVIS-debug.apk"
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: JARVIS-debug-apk
