@@ -10,6 +10,7 @@ import com.jarvis.ai.core.agent.ToolRegistry
 import com.jarvis.ai.core.agent.canGoTo
 import com.jarvis.ai.core.audio.AudioCapture
 import com.jarvis.ai.core.audio.DeepgramTtsProvider
+import com.jarvis.ai.core.audio.SpeechPipeline
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.stt.SttEngine
 import com.jarvis.ai.core.stt.SttEvent
@@ -77,6 +78,7 @@ class HomeViewModel @Inject constructor(
     private val history = mutableListOf<ChatMessage>()
 
     private var runJob: Job? = null
+    private var pipeline: SpeechPipeline? = null
     private var meterJob: Job? = null
     private var sttJob: Job? = null
     private var confirmation: CompletableDeferred<Boolean>? = null
@@ -149,7 +151,31 @@ class HomeViewModel @Inject constructor(
         }
 
         go(AssistantState.THINKING)
+        _ui.value = _ui.value.copy(transcript = "")
         val current = settings.value
+
+        // Speak sentence by sentence as the model writes, instead of
+        // waiting for the whole reply and then the whole audio.
+        val speech = if (current.autoSpeak) {
+            stt.pauseUplink()
+            SpeechPipeline(
+                scope = viewModelScope,
+                speak = { chunk ->
+                    go(AssistantState.SPEAKING)
+                    voice.speak(
+                        text = chunk,
+                        voice = current.voice,
+                        pitch = current.voicePitch,
+                        rate = current.voiceRate,
+                        preferredProviderId = current.voiceProvider,
+                    )
+                },
+                onError = { message -> _ui.value = _ui.value.copy(lastError = message) },
+            )
+        } else {
+            null
+        }
+        pipeline = speech
 
         val outcome = agent.run(
             apiKey = key,
@@ -165,8 +191,16 @@ class HomeViewModel @Inject constructor(
             confirm = { tool, args ->
                 if (current.confirmSensitiveActions) askConfirmation(tool, args) else true
             },
-            onEvent = ::onAgentEvent,
+            onEvent = { event ->
+                if (event is AgentRuntime.Event.Delta) speech?.push(event.text)
+                onAgentEvent(event)
+            },
         )
+
+        speech?.finish()
+        speech?.join()
+        pipeline = null
+        stt.resumeUplink()
 
         _ui.value = _ui.value.copy(
             activity = null,
@@ -179,7 +213,7 @@ class HomeViewModel @Inject constructor(
                 outcome.text?.let { history += ChatMessage.Assistant(it) }
                 trimHistory()
                 go(AssistantState.SUCCESS)
-                if (settings.value.autoSpeak) outcome.text?.let { speak(it) }
+                // Already spoken by the pipeline while it streamed.
             }
             AgentRuntime.Stop.NEEDS_CONFIRMATION -> go(AssistantState.IDLE)
             else -> go(AssistantState.ERROR)
@@ -204,6 +238,12 @@ class HomeViewModel @Inject constructor(
 
             is AgentRuntime.Event.Spoke ->
                 _ui.value = _ui.value.copy(transcript = event.text)
+
+            is AgentRuntime.Event.Delta ->
+                _ui.value = _ui.value.copy(
+                    transcript = _ui.value.transcript + event.text,
+                    activity = null,
+                )
 
             is AgentRuntime.Event.Failed ->
                 _ui.value = _ui.value.copy(lastError = event.message, activity = null)
@@ -360,6 +400,8 @@ class HomeViewModel @Inject constructor(
     fun cancel() {
         runJob?.cancel()
         runJob = null
+        pipeline?.cancel()
+        pipeline = null
         stt.resumeUplink()
         stopListening()
         confirmation?.complete(false)

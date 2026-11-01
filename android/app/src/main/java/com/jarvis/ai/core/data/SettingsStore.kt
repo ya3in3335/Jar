@@ -37,7 +37,9 @@ data class JarvisSettings(
     val reducedMotion: Boolean = false,
     val confirmSensitiveActions: Boolean = true,
     val maxToolCalls: Int = 8,
-    val maxOutputTokens: Int = 1024,
+    // Lower than it looks: a two-sentence reply is the goal, and a
+    // high cap mostly buys a longer wait.
+    val maxOutputTokens: Int = 400,
     val language: String = "ar",
 )
 

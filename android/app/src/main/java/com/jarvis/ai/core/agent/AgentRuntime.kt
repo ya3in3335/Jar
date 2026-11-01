@@ -3,7 +3,9 @@ package com.jarvis.ai.core.agent
 import com.jarvis.ai.core.net.ChatMessage
 import com.jarvis.ai.core.net.ModelTurn
 import com.jarvis.ai.core.net.OpenRouterClient
+import com.jarvis.ai.core.net.MutableToolCall
 import com.jarvis.ai.core.net.OpenRouterException
+import com.jarvis.ai.core.net.StreamEvent
 import com.jarvis.ai.core.net.ToolCall
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -29,7 +31,7 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
         val maxToolCalls: Int = 8,
         val maxDurationMs: Long = 90_000,
         val maxRetriesPerTool: Int = 1,
-        val maxOutputTokens: Int = 1024,
+        val maxOutputTokens: Int = 400,
         /** Stop once the conversation has cost this many tokens. 0 disables. */
         val tokenBudget: Int = 0,
     )
@@ -42,6 +44,9 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
         /** The loop is paused: a sensitive tool needs explicit approval. */
         data class NeedsConfirmation(val call: ToolCall, val tool: Tool) : Event
         data class Spoke(val text: String) : Event
+
+        /** A piece of the reply, as the model writes it. */
+        data class Delta(val text: String) : Event
         data class Failed(val message: String) : Event
         data class Finished(val text: String?, val toolsRun: Int, val tokensUsed: Int) : Event
     }
@@ -95,12 +100,40 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
                 while (true) {
                     onEvent(Event.Thinking())
 
-                    val turn: ModelTurn = client.complete(
+                    // Streamed, not awaited whole: the first words can be
+                    // spoken while the rest is still being written, which is
+                    // most of the perceived delay.
+                    val collected = StringBuilder()
+                    val pendingCalls = mutableMapOf<Int, MutableToolCall>()
+
+                    client.stream(
                         apiKey = apiKey,
                         model = model,
                         messages = messages,
                         tools = toolSchemas,
                         maxTokens = limits.maxOutputTokens,
+                    ).collect { streamEvent ->
+                        when (streamEvent) {
+                            is StreamEvent.Text -> {
+                                collected.append(streamEvent.delta)
+                                onEvent(Event.Delta(streamEvent.delta))
+                            }
+                            is StreamEvent.Tools ->
+                                streamEvent.calls.forEachIndexed { index, call ->
+                                    pendingCalls[index] = MutableToolCall(
+                                        call.id,
+                                        call.name,
+                                        StringBuilder(call.rawArguments),
+                                    )
+                                }
+                            is StreamEvent.Done -> Unit
+                        }
+                    }
+
+                    val turn = ModelTurn(
+                        text = collected.toString().takeIf { it.isNotBlank() },
+                        toolCalls = pendingCalls.toSortedMap().values.mapNotNull { it.toToolCall() },
+                        finishReason = null,
                     )
                     tokensUsed += turn.promptTokens + turn.completionTokens
 
@@ -207,9 +240,11 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
         appendLine("القواعد:")
         if (replyLanguage == "en") {
             // The voice is English, so the text must be too.
-            appendLine("- Reply in English only, briefly and without filler, even if asked in Arabic.")
+            appendLine("- Reply in English only, even if asked in Arabic.")
+            appendLine("- One or two sentences. No preamble, no restating the question, no sign-off.")
         } else {
-            appendLine("- تحدّث بالعربية دائمًا، بإيجاز وبلا حشو.")
+            appendLine("- تحدّث بالعربية دائمًا.")
+            appendLine("- أجب بجملة أو جملتين. لا مقدّمات ولا تكرار للسؤال ولا خاتمة.")
         }
         appendLine("- لتنفيذ أي إجراء على الهاتف استخدم الأدوات المتاحة فقط. لا تخترع أداة.")
         appendLine("- لا تقل إنك نفّذت شيئًا قبل أن تُرجع الأداة نجاحًا فعليًا.")
