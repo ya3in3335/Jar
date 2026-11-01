@@ -22,10 +22,34 @@ android {
         resourceConfigurations += listOf("ar", "fr", "en")
     }
 
+    signingConfigs {
+        /**
+         * A fixed debug key, committed to the repository on purpose.
+         *
+         * Without it, Gradle signs with whatever ~/.android/debug.keystore
+         * the build machine happens to have — and a CI runner generates a
+         * fresh one every run. Every build then carries a different
+         * signature, so installing a new APK over the previous one fails
+         * with "App not installed", and the only way through is to
+         * uninstall and lose the app's data each time.
+         *
+         * This is not a secret and must never sign a release: the password
+         * is the Android convention, and the certificate is self-signed
+         * with no identity behind it. Release signing stays in CI secrets.
+         */
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = true

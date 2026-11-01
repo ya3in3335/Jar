@@ -5,6 +5,10 @@
 .dev.vars
 *.keystore
 *.jks
+# The debug key is deliberately tracked: a per-machine key means every
+# build has a different signature, so no APK can be installed over the
+# previous one. Release keys stay excluded by the rules above.
+!android/debug.keystore
 secrets/
 local.properties
 
