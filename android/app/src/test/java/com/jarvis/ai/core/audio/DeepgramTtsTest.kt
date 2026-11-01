@@ -32,8 +32,37 @@ class DeepgramTtsTest {
     }
 
     @Test
-    fun `the default voice is one Deepgram documents`() {
-        assertEquals("aura-2-thalia-en", DeepgramTtsProvider.DEFAULT_VOICE)
+    fun `the default voice is a documented male one`() {
+        assertEquals("aura-2-zeus-en", DeepgramTtsProvider.DEFAULT_VOICE)
+        assertTrue(DeepgramTtsProvider.BUILT_IN_VOICES.any { it.id == DeepgramTtsProvider.DEFAULT_VOICE })
+    }
+
+    @Test
+    fun `expressivity is only claimed where Deepgram offers it`() {
+        // Deepgram documents it as Flux-only. Sending it to Aura would be
+        // a parameter that silently does nothing.
+        assertTrue(DeepgramTtsProvider.supportsExpressivity("flux-alexis-en"))
+        assertFalse(DeepgramTtsProvider.supportsExpressivity("aura-2-zeus-en"))
+    }
+
+    @Test
+    fun `aura goes to v1 and carries no expressivity`() {
+        val url = DeepgramTtsProvider.speakUrlFor("aura-2-zeus-en", expressivity = 2)
+        assertTrue(url.startsWith("https://api.deepgram.com/v1/speak"))
+        assertFalse(url.contains("expressivity"))
+    }
+
+    @Test
+    fun `flux goes to v2 and carries the register`() {
+        val url = DeepgramTtsProvider.speakUrlFor("flux-alexis-en", expressivity = -2)
+        assertTrue(url.startsWith("https://api.deepgram.com/v2/speak"))
+        assertTrue(url.contains("expressivity=-2"))
+    }
+
+    @Test
+    fun `expressivity is clamped to the documented range`() {
+        assertTrue(DeepgramTtsProvider.speakUrlFor("flux-x-en", 9).contains("expressivity=2"))
+        assertTrue(DeepgramTtsProvider.speakUrlFor("flux-x-en", -9).contains("expressivity=-2"))
     }
 
     @Test
