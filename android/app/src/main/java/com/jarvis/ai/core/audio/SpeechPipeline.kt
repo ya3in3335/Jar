@@ -91,9 +91,18 @@ class SpeechPipeline(
     companion object {
         private const val TAG = "SpeechPipeline"
 
-        /** Shorter for the opener, so the first sound arrives sooner. */
-        private const val FIRST_MIN = 12
-        private const val LATER_MIN = 40
+        /**
+         * Minimum characters before a terminator may end a chunk.
+         *
+         * Small on purpose: "تم." is a complete and useful first reply,
+         * and a high floor would delay exactly the answers that should be
+         * fastest. It is only here to stop an abbreviation like "د." from
+         * becoming an utterance of its own.
+         */
+        private const val FIRST_MIN = 3
+
+        /** Slightly higher later, to avoid a stream of tiny fragments. */
+        private const val LATER_MIN = 12
 
         /** Cut here even mid-sentence, or a rambling reply never starts. */
         private const val HARD_MAX = 220
