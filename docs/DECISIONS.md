@@ -108,3 +108,69 @@ Durable Objects تعطي الاثنين: كائن واحد لكل hub، بداخ
 **السبب:** مفتاح داخل APK هو مفتاح مكشوف لمن يفكّ الحزمة. الرمز المؤقّت ينتهي خلال دقائق، فتسريبه يكلّف قليلًا.
 
 **TTL:** عشر دقائق. الافتراضي عند ديبڨرام ثلاثون ثانية وهي ضيّقة لهاتف قد يقفل شاشته بين الطلب والاتصال؛ وأقصى ما يسمح به ساعة. والخادم **يقصّ** ما يطلبه الجهاز، فلا يستطيع جهاز طلب رمز ليوم كامل.
+
+## D11 — Screen automation is wired to the agent, not just declared
+
+The accessibility service existed since phase 1 but was never connected to
+the tool dispatcher, so "open YouTube and play the first result" opened
+YouTube and stopped. Intents reach an app's front door and no further.
+
+`ScreenTools.kt` exposes eight tools over it: read_screen, find_on_screen,
+wait_for_screen, tap, scroll_screen, type_text, press_key, and
+open_accessibility_settings. The service gained the actions they need —
+gesture dispatch for taps that Compose and Flutter surfaces do not expose
+as clickable nodes, ACTION_SET_TEXT for typing, scroll actions with a swipe
+fallback, and the global back/home/recents actions.
+
+Two constraints shaped it:
+
+- **The service is off until the user turns it on by hand, and it stays
+  that way.** The app cannot enable it, and does not pretend to. Every tool
+  returns a failure naming the settings path, and the agent prompt tells
+  the model to offer that page once and then stop rather than retrying.
+- **Looking costs tool calls.** The model is instructed to read the screen
+  before tapping and after every action, because the alternative is tapping
+  text it guessed at. That raised the ceiling from 14 calls to 24; a single
+  UI chain spends eight or nine before it has done anything.
+
+Password fields are skipped in every traversal, and the service config
+requests no key-event filtering — reading what is on screen on request is
+the capability, not input capture.
+
+## D12 — Streaming synthesis, because the wait was four waits
+
+Speech was: POST the whole sentence, wait for the whole audio, write it to
+a cache file, let MediaPlayer decode and prepare it, then play. Sentence
+chunking helped the first word arrive sooner but every chunk still paid all
+four costs.
+
+Both cloud voices now stream into `AudioTrack` through a shared `PcmPlayer`:
+
+- **Deepgram** over its synthesis WebSocket (`wss://.../v1/speak`, `/v2/speak`
+  for Flux), which emits raw PCM as it is generated. The socket is held open
+  between sentences so the TLS handshake is not in front of each one.
+- **Azure** over the REST endpoint it already used, asking for
+  `raw-24khz-16bit-mono-pcm` instead of MP3. The body was always chunked;
+  MP3 was the only reason it had to land on disk first, because MediaPlayer
+  needs a seekable source. Raw PCM needs no decoder and no seeking.
+
+Time to first sound stops scaling with sentence length. Both file-based
+providers stay in the chain behind their streaming siblings, so a blocked
+WebSocket or a flaky connection still speaks.
+
+Three details that are easy to get wrong and were:
+
+- The flush acknowledgement arrives on OkHttp's reader thread. Signalling it
+  with a channel rather than a continuation avoids resuming a coroutine from
+  inside a lock, where the resumed code goes straight on to block on the
+  speaker.
+- The audio channel is unbounded. Pacing belongs at the blocking write into
+  AudioTrack; bounding the channel would mean either stalling the socket
+  thread or retrying off-thread, and the latter can reorder frames.
+- Playback has to drain before the track is released, or the last word of
+  every sentence is cut off. `playbackHeadPosition` gives the real
+  remainder, so it is a bounded wait rather than a guessed sleep.
+
+The orb's level now comes from the actual samples being written, measured in
+`PcmPlayer.levelOf`, rather than from an animation standing in for one.
+

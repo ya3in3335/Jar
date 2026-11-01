@@ -20,9 +20,12 @@ import kotlin.coroutines.resume
  * encrypted at rest with an Android Keystore key. The backend relay stays
  * available for the paired setup, where the key never reaches the device.
  *
- * Audio is written to a cache file before playing rather than streamed:
- * MediaPlayer cannot seek a chunked HTTP body reliably, and a failed seek
- * mid-sentence is worse than a short wait.
+ * Audio is written to a cache file before playing: MediaPlayer needs a
+ * seekable source, so a chunked HTTP body cannot feed it directly. That is
+ * a whole-sentence wait, which is why AzureStreamingTts exists and is tried
+ * first — it asks for raw PCM and needs no decoder at all. This provider
+ * stays behind it as the fallback, since MP3 over a flaky connection is
+ * more forgiving than raw PCM.
  */
 class AzureTtsProvider(
     private val http: OkHttpClient,
@@ -113,14 +116,19 @@ class AzureTtsProvider(
 
     override suspend fun voices(): List<VoiceOption> = ARABIC_VOICES
 
-    private fun describe(code: Int): String = when (code) {
-        401, 403 -> "أزور رفض المفتاح أو المنطقة"
-        429 -> "تجاوزت حصّة الصوت، حاول بعد قليل"
-        400 -> "أزور رفض الطلب (تحقّق من اسم الصوت)"
-        else -> "خطأ من خدمة الصوت (HTTP $code)"
-    }
-
     companion object {
+
+        /**
+         * Shared with the streaming provider: both talk to the same
+         * endpoint, so they should explain its failures identically.
+         */
+        fun describe(code: Int): String = when (code) {
+            401, 403 -> "أزور رفض المفتاح أو المنطقة"
+            429 -> "تجاوزت حصّة الصوت، حاول بعد قليل"
+            400 -> "أزور رفض الطلب (تحقّق من اسم الصوت)"
+            else -> "خطأ من خدمة الصوت (HTTP $code)"
+        }
+
         val ARABIC_VOICES = listOf(
             VoiceOption("ar-DZ-IsmaelNeural", "إسماعيل", "ar-DZ", "الجزائر"),
             VoiceOption("ar-DZ-AminaNeural", "أمينة", "ar-DZ", "الجزائر"),

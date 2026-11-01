@@ -38,7 +38,10 @@ data class JarvisSettings(
     val confirmSensitiveActions: Boolean = true,
     // Multi-step instructions chain several tools, so the ceiling
     // is higher than a single action needs.
-    val maxToolCalls: Int = 14,
+    // Screen automation is many small steps — open, wait, read, tap, read
+    // again — so a chain that touches the UI needs far more headroom than
+    // one that only fires intents.
+    val maxToolCalls: Int = 24,
     // Lower than it looks: a two-sentence reply is the goal, and a
     // high cap mostly buys a longer wait.
     val maxOutputTokens: Int = 400,

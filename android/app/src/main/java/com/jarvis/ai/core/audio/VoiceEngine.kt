@@ -25,12 +25,16 @@ class VoiceEngine @Inject constructor(
 ) {
 
     private val system = SystemTtsProvider(context)
+    private val azureStream = AzureStreamingTts(http, secureStore)
     private val azure = AzureTtsProvider(http, secureStore, context.cacheDir)
+    private val deepgramStream = DeepgramStreamingTts(http, secureStore)
     private val deepgram = DeepgramTtsProvider(http, secureStore, context.cacheDir)
     private val relay = RelayTtsProvider(http, secureStore, context.cacheDir)
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var focusRequest: AudioFocusRequest? = null
+    private val focusLock = Any()
+    private var speaking = 0
 
     @Volatile private var active: TtsProvider? = null
 
@@ -41,9 +45,22 @@ class VoiceEngine @Inject constructor(
      * gives the Algerian neural voice with only a key. The relay is for a
      * paired backend, and the device engine always works as a last resort.
      */
-    val providers: List<TtsProvider> get() = listOf(azure, deepgram, relay, system)
+    val providers: List<TtsProvider>
+        get() = listOf(azureStream, azure, deepgramStream, deepgram, relay, system)
 
     suspend fun availableProviders(): List<TtsProvider> = providers.filter { it.isAvailable() }
+
+    /**
+     * Delivery register, for the Deepgram voices that have one.
+     *
+     * Flux-only, and Deepgram says so plainly: Aura-2 ignores it. Kept in
+     * one place so both the streaming and REST paths agree.
+     */
+    fun setExpressivity(value: Int) {
+        val clamped = value.coerceIn(-2, 2)
+        deepgramStream.expressivity = clamped
+        deepgram.expressivity = clamped
+    }
 
     data class SpokenBy(val providerId: String, val fellBack: Boolean)
 
@@ -62,12 +79,18 @@ class VoiceEngine @Inject constructor(
     ): SpokenBy {
         if (text.isBlank()) return SpokenBy("none", false)
 
+        // The streaming socket is tried before the REST endpoint for every
+        // Deepgram choice: same voices, same key, but the first sound
+        // arrives while the sentence is still being synthesised instead of
+        // after. REST stays behind it, so a blocked WebSocket still speaks.
         val ordered = when (preferredProviderId) {
-            "system" -> listOf(system, azure, deepgram, relay)
-            "azure" -> listOf(azure, relay, deepgram, system)
-            "deepgram" -> listOf(deepgram, azure, system)
-            "relay" -> listOf(relay, azure, deepgram, system)
-            else -> listOf(azure, deepgram, relay, system)
+            "system" -> listOf(system, azureStream, azure, deepgramStream, deepgram, relay)
+            "azure", "azure-stream" ->
+                listOf(azureStream, azure, relay, deepgramStream, deepgram, system)
+            "deepgram", "deepgram-stream" ->
+                listOf(deepgramStream, deepgram, azureStream, azure, system)
+            "relay" -> listOf(relay, azureStream, azure, deepgramStream, deepgram, system)
+            else -> listOf(azureStream, azure, deepgramStream, deepgram, relay, system)
         }
 
         requestFocus()
@@ -108,35 +131,56 @@ class VoiceEngine @Inject constructor(
         active?.stop()
         active = null
         providers.forEach { it.stop() }
-        abandonFocus()
+        releaseFocus()
     }
 
     fun release() {
         providers.forEach { it.release() }
-        abandonFocus()
+        releaseFocus()
     }
 
     /**
      * Duck other audio while speaking, rather than fighting it. Music drops
      * in volume and comes back on its own once focus is abandoned.
+     *
+     * Reference-counted, because a reply is spoken sentence by sentence:
+     * taking and dropping focus per sentence would make background music
+     * surge between every one.
      */
     private fun requestFocus() {
         val manager = audioManager ?: return
-        val attributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANT)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-            .setAudioAttributes(attributes)
-            .setWillPauseWhenDucked(false)
-            .build()
-        focusRequest = request
-        manager.requestAudioFocus(request)
+        synchronized(focusLock) {
+            if (speaking++ > 0) return
+            val attributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attributes)
+                .setWillPauseWhenDucked(false)
+                .build()
+            focusRequest = request
+            manager.requestAudioFocus(request)
+        }
     }
 
     private fun abandonFocus() {
         val manager = audioManager ?: return
-        focusRequest?.let { manager.abandonAudioFocusRequest(it) }
-        focusRequest = null
+        synchronized(focusLock) {
+            if (speaking > 0) speaking--
+            if (speaking > 0) return
+            focusRequest?.let { manager.abandonAudioFocusRequest(it) }
+            focusRequest = null
+        }
+    }
+
+    /** Drop focus outright, whatever the count — for stop(). */
+    private fun releaseFocus() {
+        val manager = audioManager ?: return
+        synchronized(focusLock) {
+            speaking = 0
+            focusRequest?.let { manager.abandonAudioFocusRequest(it) }
+            focusRequest = null
+        }
     }
 }

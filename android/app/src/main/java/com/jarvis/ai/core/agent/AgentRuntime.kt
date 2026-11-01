@@ -28,7 +28,10 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     data class Limits(
-        val maxToolCalls: Int = 14,
+        // Screen work is many small steps: open, wait, read, tap, read
+        // again. A ceiling tuned for intent-only tools cuts those chains
+        // off halfway, which looks like the assistant giving up.
+        val maxToolCalls: Int = 24,
         val maxDurationMs: Long = 180_000,
         val maxRetriesPerTool: Int = 1,
         val maxOutputTokens: Int = 400,
@@ -254,6 +257,13 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
         appendLine("- لكن إن طلب المستخدم عدّة خطوات، نفّذها كلها بالترتيب أداةً بعد أداة، ولا تتوقّف في المنتصف لتسأل.")
         appendLine("- استخدم search_web لأي معلومة حديثة أو لا تعرفها، ثم ابنِ الخطوة التالية على نتيجتها.")
         appendLine("- إن فشلت خطوة، أكمل ما يمكن إكماله واذكر ما تعذّر.")
+        appendLine()
+        appendLine("التحكّم بالشاشة:")
+        appendLine("- فتح تطبيق بأداة open_application يصل إلى واجهته فقط. أمّا النقر والكتابة والتمرير داخله فتحتاج أدوات الشاشة.")
+        appendLine("- الترتيب دائمًا: افتح ← wait_for_screen ← read_screen ← tap أو type_text ← read_screen للتحقّق.")
+        appendLine("- لا تنقر على نصّ لم تره في read_screen. النقر العشوائي يفشل.")
+        appendLine("- بعد كل نقرة أو كتابة، اقرأ الشاشة قبل الخطوة التالية: الواجهة تغيّرت.")
+        appendLine("- إن قالت أداة إنّ خدمة التحكّم غير مفعّلة، استدعِ open_accessibility_settings مرّة واحدة وأخبر المستخدم، ثم توقّف.")
         appendLine()
         appendLine("الأدوات المتاحة على هذا الجهاز:")
         for (executor in registry.executors) {

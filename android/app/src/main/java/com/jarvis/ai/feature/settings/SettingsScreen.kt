@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.jarvis.ai.R
+import com.jarvis.ai.core.agent.JarvisAccessibilityService
 import com.jarvis.ai.ui.theme.BgPanel
 import com.jarvis.ai.ui.theme.ErrorRed
 import com.jarvis.ai.ui.theme.SuccessGreen
@@ -438,7 +439,9 @@ fun SettingsScreen(
             SliderRow(
                 label = "أقصى عدد لاستدعاءات الأدوات",
                 value = settings.maxToolCalls.toFloat(),
-                range = 1f..20f,
+                // Screen automation spends calls on looking before acting,
+                // so the ceiling has to sit above what a UI chain needs.
+                range = 1f..40f,
                 suffix = "",
             ) { viewModel.setMaxToolCalls(it.roundToInt()) }
 
@@ -448,6 +451,35 @@ fun SettingsScreen(
                 range = 128f..4096f,
                 suffix = "",
             ) { viewModel.setMaxOutputTokens(it.roundToInt()) }
+        }
+
+        // -------------------------------------------------- screen control
+        Section(title = "التحكّم بالشاشة") {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            // Read on each recomposition rather than cached: the user
+            // leaves the app to toggle this and comes straight back.
+            val enabled = JarvisAccessibilityService.isEnabled
+
+            Text(
+                if (enabled) "مفعّلة — يمكنني النقر والكتابة والتمرير على الشاشة" else "غير مفعّلة",
+                color = if (enabled) SuccessGreen else WarnAmber,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                "بدونها أستطيع فتح التطبيقات فقط، أمّا النقر داخلها والكتابة فيها " +
+                    "فيحتاج هذا الإذن. التفعيل يدويّ من إعدادات النظام — لا يمكن للتطبيق تفعيله بنفسه.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (!enabled) {
+                OutlinedButton(onClick = {
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                        )
+                    }
+                }) { Text("افتح إعدادات إمكانية الوصول") }
+            }
         }
 
         // -------------------------------------------------- appearance

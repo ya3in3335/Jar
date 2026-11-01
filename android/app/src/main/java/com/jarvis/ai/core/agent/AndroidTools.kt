@@ -328,6 +328,10 @@ fun defaultToolExecutors(context: Context): List<ToolExecutor> = listOf(
     OpenUrlTool(context),
     SearchWebTool(context),
     *deviceTools(context).toTypedArray(),
+    // Acting on the screen, not just launching at it. These need the
+    // accessibility service, which the user enables by hand; each one
+    // reports honestly when it is off.
+    *screenTools(context).toTypedArray(),
     ControlVolumeTool(context),
     MediaControlTool(context, play = true),
     MediaControlTool(context, play = false),

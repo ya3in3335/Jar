@@ -55,6 +55,24 @@ class VoiceProviderPolicyTest {
     }
 
     @Test
+    fun `the streaming provider asks for the format its player expects`() {
+        // raw PCM is what makes it streamable: an MP3 body would need a
+        // decoder, and that puts the whole-sentence wait straight back.
+        assertEquals("raw-24khz-16bit-mono-pcm", AzureStreamingTts.OUTPUT_FORMAT)
+    }
+
+    @Test
+    fun `both Azure providers build the same SSML`() {
+        // The streaming path must not quietly lose the prosody or the
+        // escaping that the file-based one got right.
+        val args = arrayOf("مرحبا", "ar-DZ-IsmaelNeural", "-15Hz", "-8%")
+        assertEquals(
+            AzureTtsProvider.buildSsml(args[0], args[1], args[2], args[3]),
+            AzureStreamingTts.buildSsml(args[0], args[1], args[2], args[3]),
+        )
+    }
+
+    @Test
     fun `arabic text passes through unescaped`() {
         assertEquals("مرحبا بك", AzureTtsProvider.escapeXml("مرحبا بك"))
     }
