@@ -36,7 +36,9 @@ data class JarvisSettings(
     val wakeWordEnabled: Boolean = false,
     val reducedMotion: Boolean = false,
     val confirmSensitiveActions: Boolean = true,
-    val maxToolCalls: Int = 8,
+    // Multi-step instructions chain several tools, so the ceiling
+    // is higher than a single action needs.
+    val maxToolCalls: Int = 14,
     // Lower than it looks: a two-sentence reply is the goal, and a
     // high cap mostly buys a longer wait.
     val maxOutputTokens: Int = 400,

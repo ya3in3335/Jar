@@ -2,10 +2,12 @@ package com.jarvis.ai.di
 
 import android.content.Context
 import com.jarvis.ai.core.agent.ToolRegistry
+import com.jarvis.ai.core.agent.WebSearchTool
 import com.jarvis.ai.core.agent.defaultToolExecutors
 import com.jarvis.ai.core.audio.AudioCapture
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.net.JarvisBackend
+import com.jarvis.ai.core.net.OpenRouterClient
 import com.jarvis.ai.core.stt.AutoSttSessionProvider
 import com.jarvis.ai.core.stt.BackendSttSessionProvider
 import com.jarvis.ai.core.stt.DeepgramStt
@@ -74,8 +76,16 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun toolRegistry(@ApplicationContext context: Context): ToolRegistry =
-        ToolRegistry(defaultToolExecutors(context))
+    fun toolRegistry(
+        @ApplicationContext context: Context,
+        openRouter: OpenRouterClient,
+        secureStore: SecureStore,
+    ): ToolRegistry = ToolRegistry(
+        defaultToolExecutors(context) +
+            // Research runs on the key the user already has: OpenRouter's
+            // ":online" plugin means no second account for web search.
+            WebSearchTool(openRouter, { secureStore.openRouterKey }),
+    )
 
     @Provides
     @Singleton

@@ -53,6 +53,9 @@ class DeepgramTtsProvider(
 
     override suspend fun isAvailable(): Boolean = !secureStore.deepgramKey.isNullOrBlank()
 
+    /** Delivery register for Flux voices; ignored by Aura, which has none. */
+    @Volatile var expressivity: Int = 0
+
     override suspend fun speak(
         text: String,
         voice: String,
@@ -61,11 +64,11 @@ class DeepgramTtsProvider(
         onAmplitude: ((Float) -> Unit)?,
     ) {
         val key = secureStore.deepgramKey ?: throw TtsException("أضف مفتاح ديبڨرام من الإعدادات")
-        val model = if (voice.startsWith("aura")) voice else DEFAULT_VOICE
+        val model = if (voice.startsWith("aura") || voice.startsWith("flux-")) voice else DEFAULT_VOICE
 
         val audio = withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$SPEAK_URL?model=$model&encoding=mp3")
+                .url(speakUrlFor(model, expressivity))
                 // A raw account key uses the Token scheme, not Bearer.
                 .header("Authorization", "Token $key")
                 .post(buildBody(text).toRequestBody(jsonType))
@@ -172,15 +175,53 @@ class DeepgramTtsProvider(
     companion object {
         private const val TAG = "DeepgramTts"
         const val SPEAK_URL = "https://api.deepgram.com/v1/speak"
+        const val SPEAK_URL_V2 = "https://api.deepgram.com/v2/speak"
         const val MODELS_URL = "https://api.deepgram.com/v1/models"
 
-        /** Documented by Deepgram, so it is safe to default to. */
-        const val DEFAULT_VOICE = "aura-2-thalia-en"
+        /**
+         * A deep, smooth male voice, from Deepgram's own voice table.
+         * Calm and strong is exactly what Zeus is documented as.
+         */
+        const val DEFAULT_VOICE = "aura-2-zeus-en"
 
+        /**
+         * Male Aura-2 voices, with the characteristics Deepgram documents
+         * for each. Only names from their own table are shipped: a guessed
+         * model id fails at the moment the user expects speech.
+         */
         val BUILT_IN_VOICES = listOf(
-            VoiceOption("aura-2-thalia-en", "Thalia", "en-US", "واضح وودود"),
-            VoiceOption("aura-asteria-en", "Asteria", "en-US", "الجيل الأول"),
+            VoiceOption("aura-2-zeus-en", "Zeus", "en-US", "عميق، واثق، سلس"),
+            VoiceOption("aura-2-saturn-en", "Saturn", "en-US", "باريتون، واثق، متمكّن"),
+            VoiceOption("aura-2-orpheus-en", "Orpheus", "en-US", "مهنيّ، واضح، جدير بالثقة"),
+            VoiceOption("aura-2-apollo-en", "Apollo", "en-US", "واثق، مرتاح، عفويّ"),
+            VoiceOption("aura-2-atlas-en", "Atlas", "en-US", "ناضج، متحمّس، ودود"),
         )
+
+        /**
+         * Delivery register, from calm to animated.
+         *
+         * Real and documented, but Flux-only: Deepgram states plainly that
+         * expressivity is not available on Aura-2. So it is sent only for
+         * a flux-* voice, and the slider is hidden otherwise rather than
+         * pretending to do something.
+         *
+         * It is NOT laughter or sighs. Deepgram has no non-speech
+         * vocalisation at all, and a tag like [laughing] is either stripped
+         * or read aloud as the word.
+         */
+        fun supportsExpressivity(voice: String): Boolean = voice.startsWith("flux-")
+
+        fun isFluxVoice(voice: String): Boolean = voice.startsWith("flux-")
+
+        /** Flux is served from /v2/speak; Aura from /v1/speak. */
+        fun speakUrlFor(voice: String, expressivity: Int): String {
+            val base = if (isFluxVoice(voice)) SPEAK_URL_V2 else SPEAK_URL
+            val params = StringBuilder("?model=$voice&encoding=mp3")
+            if (isFluxVoice(voice)) {
+                params.append("&expressivity=").append(expressivity.coerceIn(-2, 2))
+            }
+            return base + params
+        }
 
         /** JSON body for one utterance. */
         fun buildBody(text: String): String =
@@ -197,7 +238,7 @@ class DeepgramTtsProvider(
                 val name = model["canonical_name"]?.jsonPrimitive?.content
                     ?: model["name"]?.jsonPrimitive?.content
                     ?: return@mapNotNull null
-                if (!name.startsWith("aura")) return@mapNotNull null
+                if (!name.startsWith("aura") && !name.startsWith("flux-")) return@mapNotNull null
 
                 val language = model["languages"]?.jsonArray?.firstOrNull()
                     ?.jsonPrimitive?.content ?: "en"
@@ -225,6 +266,6 @@ class DeepgramTtsProvider(
 
         /** True when a voice speaks English, so replies must be English too. */
         fun isEnglishVoice(voice: String): Boolean =
-            voice.startsWith("aura") || voice.endsWith("-en")
+            voice.startsWith("aura") || voice.startsWith("flux-") || voice.endsWith("-en")
     }
 }

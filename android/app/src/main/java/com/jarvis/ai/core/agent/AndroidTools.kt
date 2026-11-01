@@ -162,8 +162,8 @@ class OpenUrlTool(private val context: Context) : ToolExecutor {
 
 class SearchWebTool(private val context: Context) : ToolExecutor {
     override val tool = Tool(
-        name = "search_web",
-        description = "يبحث في الويب ويعرض النتائج في المتصفح.",
+        name = "open_web_search",
+        description = "يفتح نتائج البحث في المتصفح ليقرأها المستخدم بنفسه. للبحث والحصول على خلاصة استخدم search_web.",
         parameters = listOf(Tool.Param("query", "string", "عبارة البحث")),
     )
 
@@ -327,6 +327,7 @@ fun defaultToolExecutors(context: Context): List<ToolExecutor> = listOf(
     OpenApplicationTool(context),
     OpenUrlTool(context),
     SearchWebTool(context),
+    *deviceTools(context).toTypedArray(),
     ControlVolumeTool(context),
     MediaControlTool(context, play = true),
     MediaControlTool(context, play = false),

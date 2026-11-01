@@ -28,8 +28,8 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     data class Limits(
-        val maxToolCalls: Int = 8,
-        val maxDurationMs: Long = 90_000,
+        val maxToolCalls: Int = 14,
+        val maxDurationMs: Long = 180_000,
         val maxRetriesPerTool: Int = 1,
         val maxOutputTokens: Int = 400,
         /** Stop once the conversation has cost this many tokens. 0 disables. */
@@ -251,6 +251,9 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
         appendLine("- إن فشلت أداة، اذكر السبب كما ورد ولا تتظاهر بالنجاح.")
         appendLine("- إن كان السؤال معرفيًا ولا يحتاج إجراءً، أجب مباشرة بلا أدوات.")
         appendLine("- لا تستدعِ أكثر من أداة واحدة إن كفت واحدة.")
+        appendLine("- لكن إن طلب المستخدم عدّة خطوات، نفّذها كلها بالترتيب أداةً بعد أداة، ولا تتوقّف في المنتصف لتسأل.")
+        appendLine("- استخدم search_web لأي معلومة حديثة أو لا تعرفها، ثم ابنِ الخطوة التالية على نتيجتها.")
+        appendLine("- إن فشلت خطوة، أكمل ما يمكن إكماله واذكر ما تعذّر.")
         appendLine()
         appendLine("الأدوات المتاحة على هذا الجهاز:")
         for (executor in registry.executors) {
