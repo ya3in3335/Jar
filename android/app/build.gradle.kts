@@ -42,6 +42,13 @@ android {
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+            // v2 alone is valid from API 24 up, and Gradle drops v1 when
+            // minSdk allows it. But sideloading does not always go through
+            // the platform installer: some OEM package installers and file
+            // managers still look for the old JAR signature and refuse the
+            // APK without it. Signing both ways costs nothing.
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
