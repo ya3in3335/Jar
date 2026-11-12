@@ -159,7 +159,7 @@ fun HomeScreen(
             exit = fadeOut() + shrinkVertically(),
         ) {
             NoticeCard(
-                title = "مفتاح OpenRouter غير مضبوط",
+                title = "مفتاح ${settings.modelProvider.label} غير مضبوط",
                 detail = "الأوامر المباشرة تعمل الآن — الأسئلة تحتاج المفتاح",
                 tone = WarnAmber,
                 onClick = onOpenSettings,

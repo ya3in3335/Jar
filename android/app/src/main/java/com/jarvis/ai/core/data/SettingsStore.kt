@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.jarvis.ai.core.net.ModelProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -17,7 +18,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 /** Non-secret user settings. Secrets live in [SecureStore]. */
 data class JarvisSettings(
-    val model: String = "anthropic/claude-3.5-haiku",
+    /** "groq" or "openrouter" — see [ModelProvider]. */
+    val provider: String = ModelProvider.GROQ.id,
+    /** The model for the current provider; each provider remembers its own. */
+    val model: String = ModelProvider.GROQ.defaultModel,
     val routingMode: String = "balanced", // economy | balanced | quality
     /** "deepgram" for live streaming recognition, "off" to type only. */
     val sttEngine: String = "deepgram",
@@ -46,14 +50,22 @@ data class JarvisSettings(
     // high cap mostly buys a longer wait.
     val maxOutputTokens: Int = 400,
     val language: String = "ar",
-)
+) {
+    val modelProvider: ModelProvider get() = ModelProvider.fromId(provider)
+}
 
 @Singleton
 class SettingsStore @Inject constructor(private val context: Context) {
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { p ->
+        val provider = ModelProvider.fromId(p[Keys.PROVIDER])
         JarvisSettings(
-            model = p[Keys.MODEL] ?: JarvisSettings().model,
+            provider = provider.id,
+            model = when (provider) {
+                ModelProvider.GROQ -> p[Keys.MODEL_GROQ]
+                // A paid model saved by an older build is ignored, not sent.
+                ModelProvider.OPENROUTER -> p[Keys.MODEL]?.takeIf { ModelProvider.isFreeOpenRouterModel(it) }
+            } ?: provider.defaultModel,
             routingMode = p[Keys.ROUTING] ?: JarvisSettings().routingMode,
             sttEngine = p[Keys.STT_ENGINE] ?: JarvisSettings().sttEngine,
             sttLanguage = p[Keys.STT_LANGUAGE] ?: JarvisSettings().sttLanguage,
@@ -71,7 +83,15 @@ class SettingsStore @Inject constructor(private val context: Context) {
         )
     }
 
-    suspend fun setModel(value: String) = edit { it[Keys.MODEL] = value }
+    suspend fun setProvider(value: ModelProvider) = edit { it[Keys.PROVIDER] = value.id }
+
+    /** Stores [value] for the current provider; a model it does not allow is dropped. */
+    suspend fun setModel(value: String) = edit {
+        val provider = ModelProvider.fromId(it[Keys.PROVIDER])
+        if (provider.allows(value)) {
+            it[if (provider == ModelProvider.GROQ) Keys.MODEL_GROQ else Keys.MODEL] = value
+        }
+    }
     suspend fun setRoutingMode(value: String) = edit { it[Keys.ROUTING] = value }
     suspend fun setSttEngine(value: String) = edit { it[Keys.STT_ENGINE] = value }
     suspend fun setSttLanguage(value: String) = edit { it[Keys.STT_LANGUAGE] = value }
@@ -91,7 +111,10 @@ class SettingsStore @Inject constructor(private val context: Context) {
     }
 
     private object Keys {
+        val PROVIDER = stringPreferencesKey("model_provider")
+        /** OpenRouter's model; the key predates the provider choice. */
         val MODEL = stringPreferencesKey("model")
+        val MODEL_GROQ = stringPreferencesKey("model_groq")
         val ROUTING = stringPreferencesKey("routing_mode")
         val STT_ENGINE = stringPreferencesKey("stt_engine")
         val STT_LANGUAGE = stringPreferencesKey("stt_language")

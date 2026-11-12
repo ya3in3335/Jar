@@ -199,3 +199,25 @@ cannot reach the network and the app stays usable offline.
   examples (a Ready Player Me avatar and Mixamo motion). They are fine for
   development; swap `models/jarvis.glb` for an avatar you own before a public
   release.
+
+## D14 — Groq is the default brain; OpenRouter is free-models-only
+
+The app now talks to two providers through the one chat client, chosen in
+settings: **Groq** (default) and **OpenRouter**. Both speak the OpenAI
+chat-completions dialect, so only the base URL, the key and the model list
+differ (`ModelProvider`). Each provider keeps its own key and its own chosen
+model.
+
+OpenRouter is limited to free models: the `:free` variants and the
+`openrouter/free` router. This is enforced in three places so it cannot be
+bypassed by accident — the picker lists only free models, the settings store
+ignores a paid id (including one saved by an older build), and the client
+refuses a paid id before sending anything. The old default,
+`anthropic/claude-3.5-haiku`, was a paid model.
+
+Web search moved with it. It used OpenRouter's `:online` plugin on
+`gpt-4o-mini`, which bills per search; it now uses Groq's server-side
+`browser_search` tool on `openai/gpt-oss-20b`, so it needs the Groq key.
+
+Not verified: whether Groq's free tier includes `browser_search`, and how its
+rate limits feel in a long tool chain. Neither could be tested without a key.

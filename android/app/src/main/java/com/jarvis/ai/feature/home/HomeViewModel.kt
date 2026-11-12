@@ -18,6 +18,7 @@ import com.jarvis.ai.core.data.JarvisSettings
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.SettingsStore
 import com.jarvis.ai.core.net.ChatMessage
+import com.jarvis.ai.core.net.ModelProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -66,7 +67,7 @@ class HomeViewModel @Inject constructor(
     private val _ui = MutableStateFlow(
         HomeUiState(
             secureStorageAvailable = secureStore.isAvailable,
-            hasApiKey = !secureStore.openRouterKey.isNullOrBlank(),
+            hasApiKey = !secureStore.modelKey(ModelProvider.GROQ).isNullOrBlank(),
         ),
     )
     val ui: StateFlow<HomeUiState> = _ui.asStateFlow()
@@ -83,8 +84,15 @@ class HomeViewModel @Inject constructor(
     private var sttJob: Job? = null
     private var confirmation: CompletableDeferred<Boolean>? = null
 
+    init {
+        // The provider is read from disk a moment after start; the key that
+        // matters depends on it.
+        viewModelScope.launch { settings.collect { refreshKeyState() } }
+    }
+
     fun refreshKeyState() {
-        _ui.value = _ui.value.copy(hasApiKey = !secureStore.openRouterKey.isNullOrBlank())
+        val key = secureStore.modelKey(settings.value.modelProvider)
+        _ui.value = _ui.value.copy(hasApiKey = !key.isNullOrBlank())
     }
 
     /**
@@ -140,11 +148,12 @@ class HomeViewModel @Inject constructor(
 
     /** Model path: the agent loop with tools and caps. */
     private suspend fun runWithModel(utterance: String) {
-        val key = secureStore.openRouterKey
+        val provider = settings.value.modelProvider
+        val key = secureStore.modelKey(provider)
         if (key.isNullOrBlank()) {
             go(AssistantState.ERROR)
             _ui.value = _ui.value.copy(
-                lastError = "أضف مفتاح OpenRouter من الإعدادات أوّلًا",
+                lastError = "أضف مفتاح ${provider.label} من الإعدادات أوّلًا",
                 hasApiKey = false,
             )
             return
@@ -178,6 +187,7 @@ class HomeViewModel @Inject constructor(
         pipeline = speech
 
         val outcome = agent.run(
+            provider = provider,
             apiKey = key,
             model = current.model,
             instruction = utterance,

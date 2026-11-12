@@ -10,6 +10,7 @@ import com.jarvis.ai.core.data.SettingsStore
 import com.jarvis.ai.core.audio.AzureTtsProvider
 import com.jarvis.ai.core.net.JarvisBackend
 import com.jarvis.ai.core.net.ModelCapabilities
+import com.jarvis.ai.core.net.ModelProvider
 import com.jarvis.ai.core.stt.AutoSttSessionProvider
 import com.jarvis.ai.core.net.OpenRouterClient
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -54,7 +55,7 @@ class SettingsViewModel @Inject constructor(
 
     private val _ui = MutableStateFlow(
         SettingsUiState(
-            hasApiKey = !secureStore.openRouterKey.isNullOrBlank(),
+            hasApiKey = !secureStore.modelKey(ModelProvider.GROQ).isNullOrBlank(),
             secureStorageAvailable = secureStore.isAvailable,
             backendPaired = backend.isPaired,
             hasDeepgramKey = !secureStore.deepgramKey.isNullOrBlank(),
@@ -67,17 +68,38 @@ class SettingsViewModel @Inject constructor(
     val settings: StateFlow<JarvisSettings> =
         settingsStore.settings.stateIn(viewModelScope, SharingStarted.Eagerly, JarvisSettings())
 
-    val suggestedModels: List<String> = ModelCapabilities.SUGGESTED_FREE
+    private val provider: ModelProvider get() = settings.value.modelProvider
+
+    init {
+        // Everything on this screen about "the key" means the current provider's.
+        viewModelScope.launch {
+            settings.collect { _ui.value = _ui.value.copy(hasApiKey = !secureStore.modelKey(provider).isNullOrBlank()) }
+        }
+    }
+
+    // -------------------------------------------------------- the provider
+
+    fun setProvider(value: ModelProvider) {
+        if (value == provider) return
+        _ui.value = _ui.value.copy(
+            hasApiKey = !secureStore.modelKey(value).isNullOrBlank(),
+            testResult = null,
+            testOk = null,
+            toolCapableModels = emptyList(),
+        )
+        viewModelScope.launch { settingsStore.setProvider(value) }
+    }
 
     // ------------------------------------------------------------- the key
 
     fun saveApiKey(key: String) {
         val trimmed = key.trim()
         if (trimmed.isEmpty()) return
+        val target = provider
 
-        if (!trimmed.startsWith("sk-or-")) {
+        if (!trimmed.startsWith(target.keyPrefix)) {
             _ui.value = _ui.value.copy(
-                notice = "مفتاح OpenRouter يبدأ عادةً بـ sk-or- — تأكّد أنك نسخته كاملًا",
+                notice = "مفتاح ${target.label} يبدأ عادةً بـ ${target.keyPrefix} — تأكّد أنك نسخته كاملًا",
             )
             return
         }
@@ -88,17 +110,18 @@ class SettingsViewModel @Inject constructor(
             return
         }
 
-        secureStore.openRouterKey = trimmed
+        secureStore.setModelKey(target, trimmed)
         _ui.value = _ui.value.copy(hasApiKey = true, notice = "حُفظ المفتاح مشفّرًا على هذا الجهاز", testResult = null)
     }
 
     fun clearApiKey() {
-        secureStore.openRouterKey = null
+        secureStore.setModelKey(provider, null)
         _ui.value = _ui.value.copy(hasApiKey = false, testResult = null, toolCapableModels = emptyList())
     }
 
     fun testConnection() {
-        val key = secureStore.openRouterKey
+        val target = provider
+        val key = secureStore.modelKey(target)
         if (key.isNullOrBlank()) {
             _ui.value = _ui.value.copy(testOk = false, testResult = "لا يوجد مفتاح محفوظ")
             return
@@ -106,7 +129,7 @@ class SettingsViewModel @Inject constructor(
         _ui.value = _ui.value.copy(testing = true, testResult = null, testOk = null)
 
         viewModelScope.launch {
-            val result = openRouter.testConnection(key, settings.value.model)
+            val result = openRouter.testConnection(target, key, settings.value.model)
             _ui.value = _ui.value.copy(
                 testing = false,
                 testOk = result.isSuccess,
@@ -117,11 +140,12 @@ class SettingsViewModel @Inject constructor(
 
     /** Load the models that actually support tool calling. */
     fun loadModels() {
-        val key = secureStore.openRouterKey ?: return
+        val target = provider
+        val key = secureStore.modelKey(target) ?: return
         _ui.value = _ui.value.copy(loadingModels = true)
 
         viewModelScope.launch {
-            val models = runCatching { openRouter.toolCapableModels(key) }.getOrDefault(emptyList())
+            val models = runCatching { openRouter.toolCapableModels(target, key) }.getOrDefault(emptyList())
             _ui.value = _ui.value.copy(
                 loadingModels = false,
                 toolCapableModels = models.sortedBy { it.id },
