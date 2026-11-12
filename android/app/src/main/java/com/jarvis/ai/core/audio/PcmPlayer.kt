@@ -63,8 +63,8 @@ class PcmPlayer(private val sampleRate: Int) {
 
         runCatching {
             built.playbackParams = built.playbackParams
-                .setSpeed(DeepgramTtsProvider.speedFor(rate))
-                .setPitch(DeepgramTtsProvider.pitchFor(pitch))
+                .setSpeed(speedFor(rate))
+                .setPitch(pitchFor(pitch))
         }.onFailure { Log.w(TAG, "playback params unsupported: ${it.javaClass.simpleName}") }
 
         built.play()
@@ -114,6 +114,18 @@ class PcmPlayer(private val sampleRate: Int) {
     }
 
     companion object {
+        /** "-8%" onto the 0.5..2 playback multiplier AudioTrack accepts. */
+        fun speedFor(rate: String): Float {
+            val percent = rate.removeSuffix("%").toFloatOrNull() ?: return 1f
+            return (1f + percent / 100f).coerceIn(0.5f, 2.0f)
+        }
+
+        /** "-15Hz" onto a playback pitch multiplier. */
+        fun pitchFor(pitch: String): Float {
+            val hz = pitch.removeSuffix("Hz").toFloatOrNull() ?: return 1f
+            return (1f + hz / 100f).coerceIn(0.5f, 2.0f)
+        }
+
         private const val TAG = "PcmPlayer"
         private const val CHANNEL = AudioFormat.CHANNEL_OUT_MONO
         private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT

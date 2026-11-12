@@ -221,3 +221,25 @@ Web search moved with it. It used OpenRouter's `:online` plugin on
 
 Not verified: whether Groq's free tier includes `browser_search`, and how its
 rate limits feel in a long tool chain. Neither could be tested without a key.
+
+## D15 — Groq speaks; Deepgram only listens
+
+Speech output moved to Groq's Orpheus voices: six Arabic (Saudi dialect) and
+six English, on the Groq key the model already uses. It is the default voice
+provider. Azure (the Algerian voice), the relay and the phone's engine remain
+as choices and as fallbacks.
+
+Deepgram's speech providers were removed, so Deepgram is used for recognition
+only. A saved Deepgram voice moves to Groq's English one.
+
+What the service imposes, and how it is handled in `GroqTtsProvider`:
+
+- 200 characters per request: replies are cut at sentence, comma and word
+  boundaries, and the next piece is fetched while the current one plays.
+- WAV is the only format: the header is parsed for the sample rate instead of
+  assuming one.
+- No pitch or rate parameter: the user's values are applied at playback.
+
+Not verified, for want of a key: the real WAV the service returns, how the
+gap between pieces sounds, and the free-tier limits for speech. Groq has no
+Algerian-dialect voice.

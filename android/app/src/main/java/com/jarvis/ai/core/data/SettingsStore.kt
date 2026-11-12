@@ -28,12 +28,12 @@ data class JarvisSettings(
     /** Recognition language: "ar", "multi", "en", "fr". */
     val sttLanguage: String = "ar",
     /**
-     * "azure" talks to Azure directly with a key on this device (no server
-     * needed), "relay" goes through a paired backend, "system" is the
-     * phone's own engine.
+     * "groq" speaks Arabic and English on the Groq key, "azure" talks to
+     * Azure directly with its own key, "relay" goes through a paired
+     * backend, "system" is the phone's own engine.
      */
-    val voiceProvider: String = "azure",
-    val voice: String = "ar-DZ-IsmaelNeural",
+    val voiceProvider: String = "groq",
+    val voice: String = "groq-ar-fahad",
     val voicePitch: String = "-15Hz",
     val voiceRate: String = "-8%",
     val autoSpeak: Boolean = true,
@@ -69,8 +69,14 @@ class SettingsStore @Inject constructor(private val context: Context) {
             routingMode = p[Keys.ROUTING] ?: JarvisSettings().routingMode,
             sttEngine = p[Keys.STT_ENGINE] ?: JarvisSettings().sttEngine,
             sttLanguage = p[Keys.STT_LANGUAGE] ?: JarvisSettings().sttLanguage,
-            voiceProvider = p[Keys.VOICE_PROVIDER] ?: JarvisSettings().voiceProvider,
-            voice = p[Keys.VOICE] ?: JarvisSettings().voice,
+            // Deepgram no longer speaks (it is recognition-only), so a
+            // saved Deepgram voice moves to Groq's English one.
+            voiceProvider = p[Keys.VOICE_PROVIDER]?.takeUnless { it.startsWith("deepgram") }
+                ?: JarvisSettings().voiceProvider,
+            voice = when {
+                p[Keys.VOICE_PROVIDER]?.startsWith("deepgram") == true -> "groq-en-troy"
+                else -> p[Keys.VOICE] ?: JarvisSettings().voice
+            },
             voicePitch = p[Keys.PITCH] ?: JarvisSettings().voicePitch,
             voiceRate = p[Keys.RATE] ?: JarvisSettings().voiceRate,
             autoSpeak = p[Keys.AUTO_SPEAK] ?: JarvisSettings().autoSpeak,

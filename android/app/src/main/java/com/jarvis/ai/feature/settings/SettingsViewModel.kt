@@ -2,6 +2,7 @@ package com.jarvis.ai.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.jarvis.ai.core.audio.GroqTtsProvider
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.audio.VoiceOption
 import com.jarvis.ai.core.data.JarvisSettings
@@ -269,7 +270,11 @@ class SettingsViewModel @Inject constructor(
             val current = settings.value
             val result = runCatching {
                 voice.speak(
-                    text = "مرحبًا، أنا جارفيس. جاهز لتنفيذ أوامرك.",
+                    text = if (GroqTtsProvider.isEnglishVoice(current.voice)) {
+                        "Hello, I am Jarvis. Ready when you are."
+                    } else {
+                        "مرحبًا، أنا جارفيس. جاهز لتنفيذ أوامرك."
+                    },
                     voice = current.voice,
                     pitch = current.voicePitch,
                     rate = current.voiceRate,

@@ -9,7 +9,7 @@ import com.jarvis.ai.core.agent.Tool
 import com.jarvis.ai.core.agent.ToolRegistry
 import com.jarvis.ai.core.agent.canGoTo
 import com.jarvis.ai.core.audio.AudioCapture
-import com.jarvis.ai.core.audio.DeepgramTtsProvider
+import com.jarvis.ai.core.audio.GroqTtsProvider
 import com.jarvis.ai.core.audio.SpeechPipeline
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.stt.SttEngine
@@ -192,7 +192,7 @@ class HomeViewModel @Inject constructor(
             model = current.model,
             instruction = utterance,
             registry = registry,
-            replyLanguage = if (DeepgramTtsProvider.isEnglishVoice(current.voice)) "en" else "ar",
+            replyLanguage = if (GroqTtsProvider.isEnglishVoice(current.voice)) "en" else "ar",
             history = history.toList(),
             limits = AgentRuntime.Limits(
                 maxToolCalls = current.maxToolCalls,

@@ -316,17 +316,20 @@ fun SettingsScreen(
         Section(title = stringRes(R.string.settings_voice)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
-                    selected = settings.voiceProvider == "azure",
-                    onClick = { viewModel.setVoiceProvider("azure") },
-                    label = { Text("إسماعيل (أزور مباشرة)") },
+                    selected = settings.voiceProvider == "groq",
+                    onClick = {
+                        viewModel.setVoiceProvider("groq")
+                        if (!settings.voice.startsWith("groq-")) viewModel.setVoice("groq-ar-fahad")
+                    },
+                    label = { Text("Groq (عربي وإنجليزي)") },
                 )
                 FilterChip(
-                    selected = settings.voiceProvider == "deepgram",
+                    selected = settings.voiceProvider == "azure",
                     onClick = {
-                        viewModel.setVoiceProvider("deepgram")
-                        viewModel.setVoice("aura-2-thalia-en")
+                        viewModel.setVoiceProvider("azure")
+                        if (settings.voice.startsWith("groq-")) viewModel.setVoice("ar-DZ-IsmaelNeural")
                     },
-                    label = { Text("ديبڨرام (إنجليزي)") },
+                    label = { Text("إسماعيل (أزور)") },
                 )
                 FilterChip(
                     selected = settings.voiceProvider == "relay",
@@ -341,10 +344,10 @@ fun SettingsScreen(
             }
 
             Text(
-                if (settings.voiceProvider == "deepgram") {
-                    "أصوات ديبڨرام إنجليزية — لا يملك أي صوت عربي. " +
-                        "لذلك سيردّ جارفيس بالإنجليزية أيضًا، لأن صوتًا إنجليزيًا يقرأ نصًّا عربيًا يخرج كلامًا مشوّهًا. " +
-                        "يستعمل نفس مفتاح ديبڨرام، ودرجة الصوت وسرعته تُطبَّقان عند التشغيل."
+                if (settings.voiceProvider == "groq") {
+                    "أصوات Groq بنفس مفتاح Groq: ستة عربية (بلهجة سعودية) وستة إنجليزية. " +
+                        "إن اخترت صوتًا إنجليزيًا سيردّ جارفيس بالإنجليزية، لأن صوتًا إنجليزيًا يقرأ نصًّا عربيًا يخرج كلامًا مشوّهًا. " +
+                        "درجة الصوت وسرعته تُطبَّقان عند التشغيل."
                 } else if (settings.voiceProvider == "azure") {
                     "يتّصل بأزور مباشرة بمفتاحك. إن تعذّر، ينطق محرّك الهاتف تلقائيًا."
                 } else if (settings.voiceProvider == "relay") {
