@@ -82,9 +82,9 @@ object AppModule {
         secureStore: SecureStore,
     ): ToolRegistry = ToolRegistry(
         defaultToolExecutors(context) +
-            // Research runs on the key the user already has: OpenRouter's
-            // ":online" plugin means no second account for web search.
-            WebSearchTool(openRouter, { secureStore.openRouterKey }),
+            // Research runs on the Groq key the user already has: Groq's
+            // server-side browser search means no second account for it.
+            WebSearchTool(openRouter, { secureStore.groqKey }),
     )
 
     @Provides

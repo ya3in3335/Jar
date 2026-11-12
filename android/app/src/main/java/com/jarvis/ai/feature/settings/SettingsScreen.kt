@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.jarvis.ai.core.net.ModelProvider
 import com.jarvis.ai.R
 import com.jarvis.ai.core.agent.JarvisAccessibilityService
 import com.jarvis.ai.ui.theme.BgPanel
@@ -99,6 +100,25 @@ fun SettingsScreen(
         // ------------------------------------------------- AI provider
         Section(title = stringRes(R.string.settings_provider)) {
             var keyInput by rememberSaveable { mutableStateOf("") }
+            val provider = settings.modelProvider
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (option in ModelProvider.entries) {
+                    FilterChip(
+                        selected = provider == option,
+                        onClick = {
+                            viewModel.setProvider(option)
+                            keyInput = ""
+                        },
+                        label = {
+                            Text(
+                                if (option == ModelProvider.OPENROUTER) "${option.label} (المجاني فقط)" else option.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        },
+                    )
+                }
+            }
 
             Text(
                 stringRes(R.string.settings_api_key_help),
@@ -113,8 +133,8 @@ fun SettingsScreen(
             OutlinedTextField(
                 value = keyInput,
                 onValueChange = { keyInput = it },
-                label = { Text(stringRes(R.string.settings_api_key)) },
-                placeholder = { Text("sk-or-...", color = TextDim) },
+                label = { Text("${stringRes(R.string.settings_api_key)} ${provider.label}") },
+                placeholder = { Text("${provider.keyPrefix}...", color = TextDim) },
                 // The key is never rendered back in clear text.
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
@@ -157,7 +177,11 @@ fun SettingsScreen(
         Section(title = stringRes(R.string.settings_model)) {
             Text(settings.model, style = MaterialTheme.typography.bodyMedium)
             Text(
-                "استدعاء الأدوات يحتاج نموذجًا يدعمه. اضغط لتحميل النماذج التي تدعمه فعلًا.",
+                if (settings.modelProvider == ModelProvider.OPENROUTER) {
+                    "تُعرَض نماذج OpenRouter المجانية فقط؛ النماذج المدفوعة مرفوضة ولا تُرسَل."
+                } else {
+                    "استدعاء الأدوات يحتاج نموذجًا يدعمه. اضغط لتحميل نماذج Groq المتاحة لمفتاحك."
+                },
                 color = TextDim,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -171,9 +195,9 @@ fun SettingsScreen(
                 }
             }
 
-            val choices = ui.toolCapableModels.map { it.id }.ifEmpty { viewModel.suggestedModels }
+            val choices = ui.toolCapableModels.map { it.id }.ifEmpty { settings.modelProvider.suggestedModels }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (id in choices.take(12)) {
+                for (id in choices.take(24)) {
                     FilterChip(
                         selected = settings.model == id,
                         onClick = { viewModel.setModel(id) },
@@ -183,7 +207,7 @@ fun SettingsScreen(
             }
             if (ui.toolCapableModels.isEmpty()) {
                 Text(
-                    "القائمة أعلاه مقترحات مجانية لم تُتحقَّق من هذا الجهاز بعد.",
+                    "القائمة أعلاه مقترحات لم تُتحقَّق من هذا الجهاز بعد.",
                     color = TextDim,
                     style = MaterialTheme.typography.bodyMedium,
                 )
