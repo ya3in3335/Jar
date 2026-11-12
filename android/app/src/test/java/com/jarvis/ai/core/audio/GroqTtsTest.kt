@@ -224,3 +224,35 @@ class GroqErrorTest {
         assertTrue(GroqTtsProvider.describe(418, "<html>teapot</html>", model).contains("418"))
     }
 }
+
+class GroqAudioChecksTest {
+
+    @Test
+    fun `peak is zero for silence and near one for full scale`() {
+        assertEquals(0f, GroqTtsProvider.peakOf(ByteArray(64)), 0f)
+        val loud = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putShort(Short.MIN_VALUE).putShort(100).array()
+        assertEquals(1f, GroqTtsProvider.peakOf(loud), 0.001f)
+    }
+
+    @Test
+    fun `a header with no samples is not audio`() {
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+        header.put("RIFF".toByteArray()).putInt(36).put("WAVE".toByteArray())
+        header.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(48_000)
+            .putInt(96_000).putShort(2).putShort(16)
+        header.put("data".toByteArray()).putInt(0)
+        assertNull(GroqTtsProvider.parseWav(header.array()))
+    }
+
+    @Test
+    fun `a streamed header with an unknown length still yields its samples`() {
+        val out = ByteBuffer.allocate(44 + 8).order(ByteOrder.LITTLE_ENDIAN)
+        out.put("RIFF".toByteArray()).putInt(-1).put("WAVE".toByteArray())
+        out.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(48_000)
+            .putInt(96_000).putShort(2).putShort(16)
+        out.put("data".toByteArray()).putInt(-1).put(ByteArray(8) { 5 })
+        val parsed = GroqTtsProvider.parseWav(out.array())
+        assertEquals(48_000, parsed!!.sampleRate)
+        assertEquals(8, parsed.pcm.size)
+    }
+}
