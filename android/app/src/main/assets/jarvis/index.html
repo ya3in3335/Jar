@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>J.A.R.V.I.S</title>
+<!-- Built by android/avatar-web (npm run build). Runs offline inside the app's WebView. -->
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--acc:#4fd8ff;--txt:#eaf6ff;--dim:#8aa3bd;--glass:rgba(10,18,32,.6);--stroke:rgba(255,255,255,.1)}
+html,body{height:100%;overflow:hidden;background:#03070f;color:var(--txt);font-family:'Cairo','Segoe UI',Tahoma,system-ui,sans-serif}
+body.embed{background:transparent}
+#app{position:fixed;inset:0}
+canvas{display:block;touch-action:none}
+#load{position:fixed;inset:0;z-index:9;display:grid;place-items:center;background:radial-gradient(60% 60% at 50% 45%,#0b1c33,#03070f);transition:opacity .7s,visibility .7s}
+#load.off{opacity:0;visibility:hidden}
+body.embed #load{background:transparent}
+.ring{width:74px;height:74px;border-radius:50%;border:3px solid rgba(255,255,255,.08);border-top-color:var(--acc);animation:sp 1s linear infinite;margin:auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+#load p{margin-top:16px;color:var(--dim);font-size:13px;text-align:center}
+#hud{position:fixed;top:0;left:0;right:0;z-index:5;padding:18px 18px 0;text-align:center;pointer-events:none}
+#hud h1{font-size:22px;font-weight:800;letter-spacing:7px;direction:ltr;color:var(--acc);text-shadow:0 0 18px color-mix(in srgb,var(--acc) 60%,transparent);transition:color .5s,text-shadow .5s}
+#st{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:6px 14px;border-radius:999px;background:var(--glass);border:1px solid color-mix(in srgb,var(--acc) 40%,transparent);font-size:12.5px;backdrop-filter:blur(12px);transition:border-color .5s}
+#st i{width:8px;height:8px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc);animation:pl 1.4s ease-in-out infinite;transition:background .5s}
+@keyframes pl{50%{opacity:.35;transform:scale(.7)}}
+#say{position:fixed;left:50%;bottom:112px;transform:translateX(-50%);z-index:5;max-width:min(88vw,420px);padding:11px 16px;border-radius:16px;background:var(--glass);border:1px solid var(--stroke);backdrop-filter:blur(14px);font-size:13.5px;line-height:1.7;text-align:center;transition:opacity .4s,transform .4s;pointer-events:none}
+#say.off{opacity:0;transform:translate(-50%,8px)}
+#dock{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:8px;max-width:94vw;overflow-x:auto;scrollbar-width:none;background:var(--glass);border:1px solid var(--stroke);border-radius:18px;backdrop-filter:blur(18px)}
+#dock::-webkit-scrollbar{display:none}
+#dock button{flex:0 0 auto;min-width:60px;padding:8px 8px;border-radius:13px;border:1px solid transparent;background:transparent;color:var(--dim);font-family:inherit;font-size:10.5px;font-weight:600;cursor:pointer;transition:all .25s}
+#dock button span{display:block;font-size:17px;line-height:1.25}
+#dock button.on{color:#04121c;background:var(--acc);box-shadow:0 6px 20px color-mix(in srgb,var(--acc) 40%,transparent)}
+body.embed #hud,body.embed #dock,body.embed #say{display:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="load"><div><div class="ring"></div><p>جاري تشغيل جارفيس…</p></div></div>
+<div id="hud"><h1>J.A.R.V.I.S</h1><div id="st"><i></i><span id="stt">جاهز</span></div></div>
+<div id="say" class="off"></div>
+<div id="dock"></div>
+<script>window.JARVIS_EMBED=true;</script>
+<script src="jarvis.js"></script>
+</body>
+</html>
