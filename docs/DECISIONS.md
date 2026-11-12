@@ -174,3 +174,28 @@ Three details that are easy to get wrong and were:
 The orb's level now comes from the actual samples being written, measured in
 `PcmPlayer.levelOf`, rather than from an animation standing in for one.
 
+
+## D13 — The home screen shows a 3D head instead of the orb
+
+The orb is replaced on Android by `JarvisAvatar`: a rigged male head that
+dissolves below the neck, looks at the finger, opens its mouth with the real
+voice level, nods on success and shakes on error. It takes the same three
+inputs the orb took (`state`, `amplitude`, `reducedMotion`), so nothing above
+it changed.
+
+It is a WebGL page rather than native 3D because the scene already existed as
+Three.js and a WebView costs one small dependency (`androidx.webkit`) instead
+of a rendering engine. The page is bundled into `assets/jarvis` and served by
+`WebViewAssetLoader`; every other request gets an empty response, so the view
+cannot reach the network and the app stays usable offline.
+
+- Source and build: `android/avatar-web` (`npm install && npm run build`).
+  The built files are committed, so CI needs no Node step.
+- The page API is `Jarvis.setState(name)` with the lowercase `AssistantState`
+  names, and `Jarvis.setLevel(0..1)`.
+- `JarvisOrb` is kept as the fallback for devices without a WebView and for
+  reduced motion.
+- The head and the animation clips are the sample models from the three.js
+  examples (a Ready Player Me avatar and Mixamo motion). They are fine for
+  development; swap `models/jarvis.glb` for an avatar you own before a public
+  release.

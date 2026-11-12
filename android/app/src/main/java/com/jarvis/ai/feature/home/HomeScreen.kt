@@ -120,7 +120,7 @@ fun HomeScreen(
 
         Spacer(Modifier.weight(1f))
 
-        JarvisOrb(
+        JarvisAvatar(
             state = ui.state,
             amplitude = ui.amplitude,
             reducedMotion = settings.reducedMotion,

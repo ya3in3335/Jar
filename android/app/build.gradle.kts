@@ -137,6 +137,7 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.common)
     implementation(libs.work.runtime.ktx)
+    implementation(libs.androidx.webkit) // serves the 3D avatar from assets over https
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -1,0 +1,13 @@
+{
+  "name": "jarvis-avatar-web",
+  "private": true,
+  "version": "1.0.0",
+  "description": "The 3D head shown on the Android home screen. Bundled into app/src/main/assets/jarvis.",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=../app/src/main/assets/jarvis/jarvis.js && cp src/index.html models/jarvis.glb models/anim.glb ../app/src/main/assets/jarvis/"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "three": "0.169.0"
+  }
+}
