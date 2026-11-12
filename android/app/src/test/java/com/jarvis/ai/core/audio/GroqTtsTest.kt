@@ -125,15 +125,57 @@ class GroqWavTest {
     fun `stereo is mixed down to mono`() {
         val parsed = GroqTtsProvider.parseWav(wav(24_000, 2, 16, shortArrayOf(100, 300, -50, 50)))!!
         val mono = ByteBuffer.wrap(parsed.pcm).order(ByteOrder.LITTLE_ENDIAN)
-        assertEquals(200, mono.getShort().toInt())
-        assertEquals(0, mono.getShort().toInt())
+        assertEquals(200.0, mono.getShort().toDouble(), 1.0)
+        assertEquals(0.0, mono.getShort().toDouble(), 1.0)
     }
 
     @Test
-    fun `anything that is not 16-bit pcm wav is refused`() {
+    fun `anything that is not a wav is refused`() {
         assertNull(GroqTtsProvider.parseWav("not audio at all".toByteArray()))
-        assertNull(GroqTtsProvider.parseWav(wav(24_000, 1, 8, shortArrayOf(1, 2))))
         assertNull(GroqTtsProvider.parseWav(ByteArray(4)))
+    }
+
+    private fun header(format: Int, channels: Int, rate: Int, bits: Int, dataSize: Int, declared: Int = dataSize): ByteBuffer {
+        val out = ByteBuffer.allocate(44 + dataSize).order(ByteOrder.LITTLE_ENDIAN)
+        out.put("RIFF".toByteArray()).putInt(-1).put("WAVE".toByteArray())
+        out.put("fmt ".toByteArray()).putInt(16).putShort(format.toShort()).putShort(channels.toShort()).putInt(rate)
+            .putInt(rate * channels * bits / 8).putShort((channels * bits / 8).toShort()).putShort(bits.toShort())
+        out.put("data".toByteArray()).putInt(declared)
+        return out
+    }
+
+    private fun samples(wav: GroqTtsProvider.Wav): List<Int> {
+        val mono = ByteBuffer.wrap(wav.pcm).order(ByteOrder.LITTLE_ENDIAN)
+        return List(wav.pcm.size / 2) { mono.getShort().toInt() }
+    }
+
+    @Test
+    fun `32-bit float samples are converted to 16-bit`() {
+        val out = header(format = 3, channels = 1, rate = 24_000, bits = 32, dataSize = 12)
+        out.putFloat(0.5f).putFloat(-1f).putFloat(2f) // the last one is out of range
+        val parsed = GroqTtsProvider.parseWav(out.array())!!
+        assertEquals(24_000, parsed.sampleRate)
+        assertEquals(listOf(16384, -32768, 32767), samples(parsed))
+    }
+
+    @Test
+    fun `24-bit samples are converted to 16-bit`() {
+        val out = header(format = 1, channels = 1, rate = 48_000, bits = 24, dataSize = 6)
+        out.put(byteArrayOf(0, 0, 0x40)).put(byteArrayOf(0, 0, 0xC0.toByte())) // +0.5 and -0.5
+        assertEquals(listOf(16384, -16384), samples(GroqTtsProvider.parseWav(out.array())!!))
+    }
+
+    @Test
+    fun `a streamed wav with unknown lengths is read to the end`() {
+        val out = header(format = 1, channels = 1, rate = 24_000, bits = 16, dataSize = 4, declared = -1)
+        out.putShort(11).putShort(-12)
+        assertEquals(listOf(11, -12), samples(GroqTtsProvider.parseWav(out.array())!!))
+    }
+
+    @Test
+    fun `an unknown encoding is refused rather than played as noise`() {
+        val out = header(format = 7, channels = 1, rate = 8_000, bits = 8, dataSize = 4) // mu-law
+        assertNull(GroqTtsProvider.parseWav(out.array()))
     }
 }
 

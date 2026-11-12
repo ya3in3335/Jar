@@ -285,7 +285,13 @@ class SettingsViewModel @Inject constructor(
                 speaking = false,
                 notice = result.fold(
                     onSuccess = { spoken ->
-                        if (spoken.fellBack) listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ") else null
+                        if (spoken.fellBack) {
+                            listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ")
+                        } else {
+                            // Proof of what was played: if this shows and nothing
+                            // was heard, the fault is the phone's volume, not the voice.
+                            spoken.detail?.let { "تمّ التشغيل: $it — إن لم تسمع شيئًا فارفع صوت الوسائط" }
+                        }
                     },
                     onFailure = { it.message ?: "تعذّر النطق" },
                 ),

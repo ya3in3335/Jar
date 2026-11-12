@@ -17,6 +17,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.roundToInt
 
 /**
  * Groq's Orpheus voices, Arabic and English, on the Groq key the model
@@ -45,6 +46,10 @@ class GroqTtsProvider(
 
     @Volatile private var player: PcmPlayer? = null
 
+    /** What the last successful call played, for the settings preview. */
+    @Volatile var lastDetail: String? = null
+        private set
+
     override suspend fun isAvailable(): Boolean = !secureStore.groqKey.isNullOrBlank()
 
     override suspend fun voices(): List<VoiceOption> = VOICES
@@ -61,11 +66,15 @@ class GroqTtsProvider(
         val pieces = splitForSpeech(text)
         if (pieces.isEmpty()) return
 
+        lastDetail = null
         try {
             coroutineScope {
                 var next: Deferred<Wav> = async(Dispatchers.IO) { fetch(key, spec, pieces[0]) }
+                var seconds = 0f
                 for (index in pieces.indices) {
                     val wav = next.await()
+                    seconds += wav.pcm.size / 2f / wav.sampleRate
+                    lastDetail = "Groq · ${spec.voice} · ${wav.sampleRate}Hz · ${"%.1f".format(java.util.Locale.US, seconds)} ث"
                     if (index + 1 < pieces.size) {
                         next = async(Dispatchers.IO) { fetch(key, spec, pieces[index + 1]) }
                     }
@@ -211,8 +220,13 @@ class GroqTtsProvider(
 
         /**
          * Read a RIFF/WAVE body into mono 16-bit PCM, or null when it is not
-         * one this player can use. Chunks are walked rather than assuming a
-         * 44-byte header, since encoders put extra chunks before the data.
+         * audio this player can use.
+         *
+         * Chunks are walked rather than assuming a 44-byte header, since
+         * encoders put extra chunks before the data. Integer PCM of any
+         * width and floating point are all accepted and converted: which of
+         * them the service sends is not documented, and a speech model's
+         * natural output is float.
          */
         fun parseWav(bytes: ByteArray): Wav? {
             if (bytes.size < 12) return null
@@ -220,6 +234,7 @@ class GroqTtsProvider(
             if (String(bytes, 8, 4, Charsets.US_ASCII) != "WAVE") return null
             val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 
+            var format = 0
             var sampleRate = 0
             var channels = 0
             var bits = 0
@@ -228,33 +243,64 @@ class GroqTtsProvider(
                 val tag = String(bytes, offset, 4, Charsets.US_ASCII)
                 val declared = buffer.getInt(offset + 4)
                 val body = offset + 8
-                // A streamed WAV may declare 0 or -1 for a length it did not know yet.
-                val size = if (declared < 0 || body + declared > bytes.size) bytes.size - body else declared
+                // A streamed WAV declares 0 or -1 for a length it did not know yet.
+                val size = if (declared <= 0 && tag == "data" || declared < 0 || body + declared > bytes.size) {
+                    bytes.size - body
+                } else {
+                    declared
+                }
 
                 if (tag == "fmt " && size >= 16) {
-                    if (buffer.getShort(body).toInt() != 1) return null // PCM only
+                    format = buffer.getShort(body).toInt() and 0xFFFF
                     channels = buffer.getShort(body + 2).toInt()
                     sampleRate = buffer.getInt(body + 4)
                     bits = buffer.getShort(body + 14).toInt()
+                    // WAVE_FORMAT_EXTENSIBLE keeps the real format in a sub-format field.
+                    if (format == 0xFFFE && size >= 26) format = buffer.getShort(body + 24).toInt() and 0xFFFF
                 } else if (tag == "data") {
-                    if (sampleRate <= 0 || bits != 16 || channels !in 1..2) return null
-                    val usable = if (declared == 0) bytes.size - body else size
-                    val data = bytes.copyOfRange(body, body + usable - usable % (2 * channels))
-                    return Wav(sampleRate, if (channels == 2) downmix(data) else data)
+                    val frameBytes = bits / 8 * channels
+                    if (sampleRate <= 0 || channels !in 1..2 || frameBytes <= 0) return null
+                    val pcm = toMono16(buffer, body, size / frameBytes, channels, bits, format) ?: return null
+                    return if (pcm.isEmpty()) null else Wav(sampleRate, pcm)
                 }
                 offset = body + size + (size and 1) // chunks are word-aligned
             }
             return null
         }
 
-        /** Average interleaved stereo into mono. */
-        private fun downmix(stereo: ByteArray): ByteArray {
-            val input = ByteBuffer.wrap(stereo).order(ByteOrder.LITTLE_ENDIAN)
-            val output = ByteBuffer.allocate(stereo.size / 2).order(ByteOrder.LITTLE_ENDIAN)
-            while (input.remaining() >= 4) {
-                output.putShort(((input.getShort() + input.getShort()) / 2).toShort())
+        private const val FORMAT_PCM = 1
+        private const val FORMAT_FLOAT = 3
+
+        /** Convert [frames] frames starting at [start] to 16-bit mono, or null for an unknown encoding. */
+        private fun toMono16(
+            buffer: ByteBuffer,
+            start: Int,
+            frames: Int,
+            channels: Int,
+            bits: Int,
+            format: Int,
+        ): ByteArray? {
+            val read: (Int) -> Float = when {
+                format == FORMAT_PCM && bits == 16 -> { at -> buffer.getShort(at) / 32768f }
+                format == FORMAT_PCM && bits == 8 -> { at -> ((buffer.get(at).toInt() and 0xFF) - 128) / 128f }
+                format == FORMAT_PCM && bits == 24 -> { at ->
+                    ((buffer.get(at + 2).toInt() shl 16) or
+                        ((buffer.get(at + 1).toInt() and 0xFF) shl 8) or
+                        (buffer.get(at).toInt() and 0xFF)) / 8388608f
+                }
+                format == FORMAT_PCM && bits == 32 -> { at -> buffer.getInt(at) / 2147483648f }
+                format == FORMAT_FLOAT && bits == 32 -> { at -> buffer.getFloat(at) }
+                format == FORMAT_FLOAT && bits == 64 -> { at -> buffer.getDouble(at).toFloat() }
+                else -> return null
             }
-            return output.array()
+            val step = bits / 8
+            val out = ByteBuffer.allocate(frames * 2).order(ByteOrder.LITTLE_ENDIAN)
+            for (frame in 0 until frames) {
+                var sum = 0f
+                for (channel in 0 until channels) sum += read(start + (frame * channels + channel) * step)
+                out.putShort((sum / channels * 32768f).roundToInt().coerceIn(-32768, 32767).toShort())
+            }
+            return out.array()
         }
 
         /**

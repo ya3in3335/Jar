@@ -57,7 +57,13 @@ class VoiceEngine @Inject constructor(
      * had to. Without it a broken cloud voice is invisible: the phone's
      * engine takes over, or nothing is heard, and nothing says why.
      */
-    data class SpokenBy(val providerId: String, val fellBack: Boolean, val reason: String? = null)
+    data class SpokenBy(
+        val providerId: String,
+        val fellBack: Boolean,
+        val reason: String? = null,
+        /** What was actually played, when the provider can say. */
+        val detail: String? = null,
+    )
 
     /**
      * Speak [text]. Returns which provider was used.
@@ -101,7 +107,7 @@ class VoiceEngine @Inject constructor(
                 try {
                     active = provider
                     provider.speak(text, voice, pitch, rate, onAmplitude)
-                    return SpokenBy(provider.id, fellBack, reason)
+                    return SpokenBy(provider.id, fellBack, reason, (provider as? GroqTtsProvider)?.lastDetail)
                 } catch (e: CancellationException) {
                     throw e // a cancelled utterance is not a provider failure
                 } catch (e: Throwable) {
