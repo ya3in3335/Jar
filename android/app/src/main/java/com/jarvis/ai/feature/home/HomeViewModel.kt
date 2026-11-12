@@ -171,12 +171,14 @@ class HomeViewModel @Inject constructor(
                 scope = viewModelScope,
                 speak = { chunk ->
                     go(AssistantState.SPEAKING)
-                    voice.speak(
-                        text = chunk,
-                        voice = current.voice,
-                        pitch = current.voicePitch,
-                        rate = current.voiceRate,
-                        preferredProviderId = current.voiceProvider,
+                    noteFallback(
+                        voice.speak(
+                            text = chunk,
+                            voice = current.voice,
+                            pitch = current.voicePitch,
+                            rate = current.voiceRate,
+                            preferredProviderId = current.voiceProvider,
+                        ),
                     )
                 },
                 onError = { message -> _ui.value = _ui.value.copy(lastError = message) },
@@ -288,6 +290,12 @@ class HomeViewModel @Inject constructor(
         confirmation?.complete(false)
     }
 
+    /** Show why the chosen voice was not the one that spoke. */
+    private fun noteFallback(spoken: VoiceEngine.SpokenBy) {
+        val reason = spoken.reason ?: return
+        if (spoken.fellBack) _ui.value = _ui.value.copy(lastError = reason)
+    }
+
     private suspend fun speak(text: String) {
         val current = settings.value
         go(AssistantState.SPEAKING)
@@ -295,12 +303,14 @@ class HomeViewModel @Inject constructor(
         // and JARVIS transcribes himself into an endless conversation.
         stt.pauseUplink()
         runCatching {
-            voice.speak(
-                text = text,
-                voice = current.voice,
-                pitch = current.voicePitch,
-                rate = current.voiceRate,
-                preferredProviderId = current.voiceProvider,
+            noteFallback(
+                voice.speak(
+                    text = text,
+                    voice = current.voice,
+                    pitch = current.voicePitch,
+                    rate = current.voiceRate,
+                    preferredProviderId = current.voiceProvider,
+                ),
             )
         }.onFailure { e ->
             if (e is CancellationException) {

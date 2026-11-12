@@ -285,7 +285,7 @@ class SettingsViewModel @Inject constructor(
                 speaking = false,
                 notice = result.fold(
                     onSuccess = { spoken ->
-                        if (spoken.fellBack) "تحدّث بمحرّك بديل: ${spoken.providerId}" else null
+                        if (spoken.fellBack) listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ") else null
                     },
                     onFailure = { it.message ?: "تعذّر النطق" },
                 ),

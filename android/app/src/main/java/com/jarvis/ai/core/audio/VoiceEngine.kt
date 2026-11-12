@@ -52,7 +52,12 @@ class VoiceEngine @Inject constructor(
 
     suspend fun availableProviders(): List<TtsProvider> = providers.filter { it.isAvailable() }
 
-    data class SpokenBy(val providerId: String, val fellBack: Boolean)
+    /**
+     * [reason] says why the chosen provider did not speak when another one
+     * had to. Without it a broken cloud voice is invisible: the phone's
+     * engine takes over, or nothing is heard, and nothing says why.
+     */
+    data class SpokenBy(val providerId: String, val fellBack: Boolean, val reason: String? = null)
 
     /**
      * Speak [text]. Returns which provider was used.
@@ -83,20 +88,25 @@ class VoiceEngine @Inject constructor(
         try {
             var fellBack = false
             var lastError: Throwable? = null
+            // Why the first choice did not speak — the one the user picked,
+            // so the one whose failure is worth showing.
+            var reason: String? = null
 
-            for (provider in ordered) {
+            for ((index, provider) in ordered.withIndex()) {
                 if (!provider.isAvailable()) {
+                    if (index == 0) reason = "${provider.label}: غير مهيّأ (لا مفتاح محفوظ له)"
                     fellBack = true
                     continue
                 }
                 try {
                     active = provider
                     provider.speak(text, voice, pitch, rate, onAmplitude)
-                    return SpokenBy(provider.id, fellBack)
+                    return SpokenBy(provider.id, fellBack, reason)
                 } catch (e: CancellationException) {
                     throw e // a cancelled utterance is not a provider failure
                 } catch (e: Throwable) {
                     lastError = e
+                    if (reason == null) reason = e.message
                     fellBack = true
                 } finally {
                     active = null
@@ -104,7 +114,7 @@ class VoiceEngine @Inject constructor(
             }
 
             throw TtsException(
-                lastError?.message ?: "لا يوجد محرّك نطق متاح على هذا الجهاز",
+                reason ?: lastError?.message ?: "لا يوجد محرّك نطق متاح على هذا الجهاز",
                 lastError,
             )
         } finally {

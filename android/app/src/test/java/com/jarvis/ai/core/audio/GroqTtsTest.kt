@@ -154,3 +154,31 @@ class PlaybackProsodyTest {
         assertEquals(1f, PcmPlayer.pitchFor(""), 0.001f)
     }
 }
+
+class GroqErrorTest {
+
+    private val model = GroqTtsProvider.MODEL_ARABIC
+
+    @Test
+    fun `unaccepted terms name the page where they are accepted`() {
+        val body = """{"error":{"message":"The model requires terms acceptance.","type":"invalid_request_error","code":"model_terms_required"}}"""
+        val text = GroqTtsProvider.describe(400, body, model)
+        assertTrue(text.contains("console.groq.com/playground?model=$model"))
+    }
+
+    @Test
+    fun `a bad key is reported as a bad key`() {
+        assertTrue(GroqTtsProvider.describe(401, """{"error":{"message":"Invalid API Key"}}""", model).contains("مفتاح"))
+    }
+
+    @Test
+    fun `any other refusal carries groq's own message`() {
+        val text = GroqTtsProvider.describe(400, """{"error":{"message":"voice must be one of [fahad]"}}""", model)
+        assertTrue(text.contains("voice must be one of"))
+    }
+
+    @Test
+    fun `a body that is not json still yields a message`() {
+        assertTrue(GroqTtsProvider.describe(418, "<html>teapot</html>", model).contains("418"))
+    }
+}

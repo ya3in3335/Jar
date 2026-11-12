@@ -1,12 +1,14 @@
 package com.jarvis.ai.core.audio
 
 import com.jarvis.ai.core.data.SecureStore
+import com.jarvis.ai.core.data.redact
 import com.jarvis.ai.core.net.ModelProvider
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -83,7 +85,9 @@ class GroqTtsProvider(
             .build()
 
         http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw TtsException(describe(response.code))
+            if (!response.isSuccessful) {
+                throw TtsException(describe(response.code, response.body?.string().orEmpty(), spec.model))
+            }
             val bytes = response.body?.bytes() ?: throw TtsException("لم تُرجع الخدمة صوتًا")
             return parseWav(bytes) ?: throw TtsException("صيغة الصوت المُرجَعة غير مفهومة")
         }
@@ -253,12 +257,30 @@ class GroqTtsProvider(
             return output.array()
         }
 
-        fun describe(code: Int): String = when (code) {
-            400 -> "رفضت Groq نص النطق — قد يحتاج نموذج الصوت قبول شروطه في لوحة Groq أوّلًا"
-            401, 403 -> "مفتاح Groq غير صحيح أو منتهي"
-            429 -> "تجاوزت حدّ النطق المجاني في Groq، حاول بعد قليل"
-            in 500..599 -> "خدمة النطق في Groq غير متاحة حاليًا"
-            else -> "فشل النطق عبر Groq (HTTP $code)"
+        /**
+         * Say why a request failed, using Groq's own words where they help.
+         *
+         * The Orpheus models refuse every request until their terms have
+         * been accepted once in the Groq console, which looks like a dead
+         * voice from inside the app — so that case names the fix.
+         */
+        fun describe(code: Int, body: String, model: String): String {
+            val error = runCatching {
+                (Json.parseToJsonElement(body) as? JsonObject)?.get("error") as? JsonObject
+            }.getOrNull()
+            val errorCode = (error?.get("code") as? JsonPrimitive)?.content.orEmpty()
+            val message = (error?.get("message") as? JsonPrimitive)?.content.orEmpty()
+
+            return when {
+                errorCode == "model_terms_required" || message.contains("terms", ignoreCase = true) ->
+                    "صوت Groq يحتاج قبول شروط النموذج مرّة واحدة: افتح " +
+                        "console.groq.com/playground?model=$model بحسابك واقبل الشروط، ثم أعد المحاولة"
+                code == 401 || code == 403 -> "مفتاح Groq غير صحيح أو منتهي"
+                code == 429 -> "تجاوزت حدّ النطق في Groq، حاول بعد قليل"
+                code in 500..599 -> "خدمة النطق في Groq غير متاحة حاليًا"
+                message.isNotBlank() -> "رفضت Groq النطق: ${redact(message).take(160)}"
+                else -> "فشل النطق عبر Groq (HTTP $code)"
+            }
         }
     }
 }
