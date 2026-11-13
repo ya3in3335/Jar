@@ -68,12 +68,19 @@ private const val AVATAR_URL = "https://$AVATAR_HOST/assets/jarvis/index.html"
 private const val LEVEL_INTERVAL_MS = 60L
 
 /** Pushes state and voice level into the page, and only when they change. */
-private class AvatarBridge {
+internal class AvatarBridge {
     private var ready = false
     private var sentState: AssistantState? = null
     private var wantedState: AssistantState = AssistantState.IDLE
     private var sentLevel = -1f
     private var levelAt = 0L
+
+    /** The page was thrown away; the next one starts from nothing. */
+    fun reset() {
+        ready = false
+        sentState = null
+        sentLevel = -1f
+    }
 
     fun onReady(view: WebView) {
         ready = true
@@ -114,7 +121,7 @@ private class AvatarBridge {
 }
 
 @SuppressLint("SetJavaScriptEnabled") // The only script that runs is the one shipped in assets.
-private fun createAvatarView(context: Context, bridge: AvatarBridge): WebView {
+internal fun createAvatarView(context: Context, bridge: AvatarBridge): WebView {
     val assets = WebViewAssetLoader.Builder()
         .setDomain(AVATAR_HOST)
         .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))

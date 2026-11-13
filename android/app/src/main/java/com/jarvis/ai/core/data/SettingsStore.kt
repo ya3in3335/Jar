@@ -37,6 +37,16 @@ data class JarvisSettings(
     val voicePitch: String = "-15Hz",
     val voiceRate: String = "-8%",
     val autoSpeak: Boolean = true,
+    /** Show the head floating over other apps (needs the accessibility service). */
+    val floatingAvatar: Boolean = true,
+    /** Attach what is on screen to every request, so he sees without being told to look. */
+    val screenAware: Boolean = true,
+    /**
+     * Look at newly opened screens unprompted and comment when it is worth
+     * it. Off until asked for: it sends screen text to the model provider
+     * on its own, and spends the provider's quota doing so.
+     */
+    val watchScreen: Boolean = false,
     val wakeWordEnabled: Boolean = false,
     val reducedMotion: Boolean = false,
     val confirmSensitiveActions: Boolean = true,
@@ -80,6 +90,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
             voicePitch = p[Keys.PITCH] ?: JarvisSettings().voicePitch,
             voiceRate = p[Keys.RATE] ?: JarvisSettings().voiceRate,
             autoSpeak = p[Keys.AUTO_SPEAK] ?: JarvisSettings().autoSpeak,
+            floatingAvatar = p[Keys.FLOATING] ?: JarvisSettings().floatingAvatar,
+            screenAware = p[Keys.SCREEN_AWARE] ?: JarvisSettings().screenAware,
+            watchScreen = p[Keys.WATCH_SCREEN] ?: JarvisSettings().watchScreen,
             wakeWordEnabled = p[Keys.WAKE_WORD] ?: JarvisSettings().wakeWordEnabled,
             reducedMotion = p[Keys.REDUCED_MOTION] ?: JarvisSettings().reducedMotion,
             confirmSensitiveActions = p[Keys.CONFIRM] ?: JarvisSettings().confirmSensitiveActions,
@@ -106,6 +119,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
     suspend fun setPitch(value: String) = edit { it[Keys.PITCH] = value }
     suspend fun setRate(value: String) = edit { it[Keys.RATE] = value }
     suspend fun setAutoSpeak(value: Boolean) = edit { it[Keys.AUTO_SPEAK] = value }
+    suspend fun setFloatingAvatar(value: Boolean) = edit { it[Keys.FLOATING] = value }
+    suspend fun setScreenAware(value: Boolean) = edit { it[Keys.SCREEN_AWARE] = value }
+    suspend fun setWatchScreen(value: Boolean) = edit { it[Keys.WATCH_SCREEN] = value }
     suspend fun setWakeWord(value: Boolean) = edit { it[Keys.WAKE_WORD] = value }
     suspend fun setReducedMotion(value: Boolean) = edit { it[Keys.REDUCED_MOTION] = value }
     suspend fun setConfirmSensitive(value: Boolean) = edit { it[Keys.CONFIRM] = value }
@@ -129,6 +145,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
         val PITCH = stringPreferencesKey("voice_pitch")
         val RATE = stringPreferencesKey("voice_rate")
         val AUTO_SPEAK = booleanPreferencesKey("auto_speak")
+        val FLOATING = booleanPreferencesKey("floating_avatar")
+        val SCREEN_AWARE = booleanPreferencesKey("screen_aware")
+        val WATCH_SCREEN = booleanPreferencesKey("watch_screen")
         val WAKE_WORD = booleanPreferencesKey("wake_word")
         val REDUCED_MOTION = booleanPreferencesKey("reduced_motion")
         val CONFIRM = booleanPreferencesKey("confirm_sensitive")

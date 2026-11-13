@@ -521,6 +521,39 @@ fun SettingsScreen(
                     }
                 }) { Text("افتح إعدادات إمكانية الوصول") }
             }
+
+            ToggleRow(
+                label = "جارفيس العائم فوق التطبيقات",
+                checked = settings.floatingAvatar,
+                onChange = viewModel::setFloatingAvatar,
+            )
+            Text(
+                "رأس جارفيس يظهر فوق الشاشة الرئيسية وباقي التطبيقات. نقرة: يسمعك. " +
+                    "ضغطة مطوّلة: يحلّل الشاشة. اسحبه لتحريكه.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            ToggleRow(
+                label = "يرى الشاشة مع كل طلب",
+                checked = settings.screenAware,
+                onChange = viewModel::setScreenAware,
+            )
+            Text(
+                "يُرفَق نصّ الشاشة الحالية بكل طلب، فلا تحتاج أن تقول له «شوف». حقول كلمات السر لا تُقرأ.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            ToggleRow(
+                label = "يراقب ويعلّق من نفسه",
+                checked = settings.watchScreen,
+                onChange = viewModel::setWatchScreen,
+            )
+            Text(
+                "عند فتح تطبيق جديد ينظر إلى الشاشة دون أن تطلب، ويتكلّم فقط إن وجد ما يستحق. " +
+                    "تنبيه: يرسل نصّ شاشتك إلى مزوّد النموذج تلقائيًا (مرّة في الدقيقة على الأكثر) ويستهلك من حصّتك.",
+                color = WarnAmber,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
 
         // -------------------------------------------------- appearance

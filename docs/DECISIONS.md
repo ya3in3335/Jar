@@ -243,3 +243,38 @@ What the service imposes, and how it is handled in `GroqTtsProvider`:
 Not verified, for want of a key: the real WAV the service returns, how the
 gap between pieces sounds, and the free-tier limits for speech. Groq has no
 Algerian-dialect voice.
+
+## D16 — He floats over other apps and sees the screen without being told
+
+Three changes that belong together.
+
+**The head floats.** The accessibility service draws the 3D head as an
+accessibility overlay over the home screen and every other app, so no
+"display over other apps" permission is added. Tap: listen (or cancel).
+Long press: look at the screen now. Drag: move. The window is never
+focusable, and it hides while the app itself is open. The page's background
+is now fully transparent (the `html` element used to stay dark).
+
+**One assistant, two faces.** The assistant moved out of `HomeViewModel`
+into `JarvisBrain`, a process-wide singleton, so the overlay and the home
+screen show and drive the same conversation, and a request made from the
+overlay keeps running with no activity open.
+
+**He sees without being asked.** With the accessibility service on, the text
+of the current screen is attached to every request (`ScreenContext.wrap`), so
+"what is this?" works without "look at my screen". Separately, and off by
+default, "watch and comment" looks at each newly opened app unprompted and
+speaks only when the model finds something worth saying.
+
+Why the watcher is off by default: it sends screen text to the model
+provider on its own, and each look spends the provider's quota. It is at
+most one look a minute, never while he is busy or listening, never on the
+launcher, the keyboard or system UI, and password fields are never read.
+
+Screen text is other apps' content, so it always goes to the model as quoted
+data with a line saying it is not an instruction; sensitive tools still ask
+for confirmation.
+
+Not verified on a device: the overlay itself, and whether the microphone
+opens from the overlay while another app is in front (Android limits
+background microphone use; an accessibility service is normally exempt).

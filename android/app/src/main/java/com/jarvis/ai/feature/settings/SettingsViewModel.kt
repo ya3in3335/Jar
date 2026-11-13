@@ -314,6 +314,9 @@ class SettingsViewModel @Inject constructor(
     fun setPitch(value: String) = viewModelScope.launch { settingsStore.setPitch(value) }
     fun setRate(value: String) = viewModelScope.launch { settingsStore.setRate(value) }
     fun setAutoSpeak(value: Boolean) = viewModelScope.launch { settingsStore.setAutoSpeak(value) }
+    fun setFloatingAvatar(value: Boolean) = viewModelScope.launch { settingsStore.setFloatingAvatar(value) }
+    fun setScreenAware(value: Boolean) = viewModelScope.launch { settingsStore.setScreenAware(value) }
+    fun setWatchScreen(value: Boolean) = viewModelScope.launch { settingsStore.setWatchScreen(value) }
     fun setReducedMotion(value: Boolean) = viewModelScope.launch { settingsStore.setReducedMotion(value) }
     fun setConfirmSensitive(value: Boolean) = viewModelScope.launch { settingsStore.setConfirmSensitive(value) }
     fun setMaxToolCalls(value: Int) = viewModelScope.launch { settingsStore.setMaxToolCalls(value.coerceIn(1, 20)) }
