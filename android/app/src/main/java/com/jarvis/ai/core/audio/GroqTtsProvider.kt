@@ -71,10 +71,14 @@ class GroqTtsProvider(
             coroutineScope {
                 var next: Deferred<Wav> = async(Dispatchers.IO) { fetch(key, spec, pieces[0]) }
                 var seconds = 0f
+                var peak = 0f
                 for (index in pieces.indices) {
                     val wav = next.await()
                     seconds += wav.pcm.size / 2f / wav.sampleRate
-                    lastDetail = "Groq · ${spec.voice} · ${wav.sampleRate}Hz · ${"%.1f".format(java.util.Locale.US, seconds)} ث"
+                    peak = maxOf(peak, peakOf(wav.pcm))
+                    // Peak 0% means the service sent silence; anything else was real sound.
+                    lastDetail = "Groq · ${spec.voice} · ${wav.sampleRate}Hz · " +
+                        "${"%.1f".format(java.util.Locale.US, seconds)} ث · أعلى مستوى ${(peak * 100).toInt()}%"
                     if (index + 1 < pieces.size) {
                         next = async(Dispatchers.IO) { fetch(key, spec, pieces[index + 1]) }
                     }
@@ -186,6 +190,18 @@ class GroqTtsProvider(
             } else {
                 VoiceSpec(MODEL_ARABIC, known.removePrefix(AR))
             }
+        }
+
+        /** Loudest sample as 0..1; 0 means the audio is pure silence. */
+        fun peakOf(pcm: ByteArray): Float {
+            var peak = 0
+            var index = 0
+            while (index + 1 < pcm.size) {
+                val sample = (pcm[index].toInt() and 0xFF) or (pcm[index + 1].toInt() shl 8)
+                peak = maxOf(peak, kotlin.math.abs(sample))
+                index += 2
+            }
+            return (peak / 32768f).coerceIn(0f, 1f)
         }
 
         fun buildBody(spec: VoiceSpec, input: String): String = JsonObject(

@@ -443,6 +443,20 @@ fun SettingsScreen(
                 )
             }
 
+            // Right under the button: the result used to appear only at the
+            // top of this long screen, where nobody pressing the button sees it.
+            ui.voiceResult?.let { result ->
+                Text(
+                    result,
+                    color = when (ui.voiceOk) {
+                        true -> SuccessGreen
+                        false -> WarnAmber
+                        null -> TextDim
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
             ToggleRow(
                 label = stringRes(R.string.settings_auto_speak),
                 checked = settings.autoSpeak,

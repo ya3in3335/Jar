@@ -41,6 +41,9 @@ data class SettingsUiState(
     val sttCheck: String? = null,
     val sttCheckOk: Boolean? = null,
     val speaking: Boolean = false,
+    /** Outcome of the last voice preview, shown beside its button. */
+    val voiceResult: String? = null,
+    val voiceOk: Boolean? = null,
     val notice: String? = null,
 )
 
@@ -264,7 +267,7 @@ class SettingsViewModel @Inject constructor(
             _ui.value = _ui.value.copy(speaking = false)
             return
         }
-        _ui.value = _ui.value.copy(speaking = true, notice = null)
+        _ui.value = _ui.value.copy(speaking = true, notice = null, voiceResult = "جاري طلب الصوت…", voiceOk = null)
 
         viewModelScope.launch {
             val current = settings.value
@@ -281,20 +284,23 @@ class SettingsViewModel @Inject constructor(
                     preferredProviderId = current.voiceProvider,
                 )
             }
+            val message = result.fold(
+                onSuccess = { spoken ->
+                    if (spoken.fellBack) {
+                        listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ")
+                    } else {
+                        // Proof of what was played: if this shows and nothing
+                        // was heard, the fault is the phone's volume, not the voice.
+                        spoken.detail?.let { "تمّ التشغيل: $it — إن لم تسمع شيئًا فارفع صوت الوسائط" }
+                            ?: "تمّ التشغيل عبر ${spoken.providerId}"
+                    }
+                },
+                onFailure = { it.message ?: "تعذّر النطق" },
+            )
             _ui.value = _ui.value.copy(
                 speaking = false,
-                notice = result.fold(
-                    onSuccess = { spoken ->
-                        if (spoken.fellBack) {
-                            listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ")
-                        } else {
-                            // Proof of what was played: if this shows and nothing
-                            // was heard, the fault is the phone's volume, not the voice.
-                            spoken.detail?.let { "تمّ التشغيل: $it — إن لم تسمع شيئًا فارفع صوت الوسائط" }
-                        }
-                    },
-                    onFailure = { it.message ?: "تعذّر النطق" },
-                ),
+                voiceResult = message,
+                voiceOk = result.getOrNull()?.fellBack == false,
             )
         }
     }
