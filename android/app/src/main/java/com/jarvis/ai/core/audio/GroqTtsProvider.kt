@@ -72,17 +72,27 @@ class GroqTtsProvider(
                 var next: Deferred<Wav> = async(Dispatchers.IO) { fetch(key, spec, pieces[0]) }
                 var seconds = 0f
                 var peak = 0f
+                var playedMs = 0L
                 for (index in pieces.indices) {
                     val wav = next.await()
                     seconds += wav.pcm.size / 2f / wav.sampleRate
                     peak = maxOf(peak, peakOf(wav.pcm))
                     // Peak 0% means the service sent silence; anything else was real sound.
-                    lastDetail = "Groq · ${spec.voice} · ${wav.sampleRate}Hz · " +
-                        "${"%.1f".format(java.util.Locale.US, seconds)} ث · أعلى مستوى ${(peak * 100).toInt()}%"
+                    val describe = { ms: Long ->
+                        "Groq · ${spec.voice} · ${wav.sampleRate}Hz · " +
+                            "${"%.1f".format(java.util.Locale.US, seconds)} ث · أعلى مستوى ${(peak * 100).toInt()}% · " +
+                            "استغرق التشغيل ${"%.1f".format(java.util.Locale.US, ms / 1000f)} ث"
+                    }
+                    lastDetail = describe(playedMs)
                     if (index + 1 < pieces.size) {
                         next = async(Dispatchers.IO) { fetch(key, spec, pieces[index + 1]) }
                     }
+                    // How long the speaker really took. Far less than the
+                    // audio's length means the samples were never played out.
+                    val began = System.nanoTime()
                     play(wav, pitch, rate, onAmplitude)
+                    playedMs += (System.nanoTime() - began) / 1_000_000
+                    lastDetail = describe(playedMs)
                 }
             }
         } finally {

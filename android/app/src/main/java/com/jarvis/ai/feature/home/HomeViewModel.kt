@@ -292,6 +292,13 @@ class HomeViewModel @Inject constructor(
 
     /** Show why the chosen voice was not the one that spoke. */
     private fun noteFallback(spoken: VoiceEngine.SpokenBy) {
+        if (spoken.unheard) {
+            // Otherwise a muted phone looks exactly like a broken voice.
+            _ui.value = _ui.value.copy(
+                lastError = "جارفيس يتكلّم لكن صوت الوسائط في الهاتف صفر — ارفعه أو أوقف الوضع الصامت",
+            )
+            return
+        }
         val reason = spoken.reason ?: return
         if (spoken.fellBack) _ui.value = _ui.value.copy(lastError = reason)
     }

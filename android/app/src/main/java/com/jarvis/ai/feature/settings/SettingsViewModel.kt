@@ -286,13 +286,14 @@ class SettingsViewModel @Inject constructor(
             }
             val message = result.fold(
                 onSuccess = { spoken ->
-                    if (spoken.fellBack) {
-                        listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ")
-                    } else {
-                        // Proof of what was played: if this shows and nothing
-                        // was heard, the fault is the phone's volume, not the voice.
-                        spoken.detail?.let { "تمّ التشغيل: $it — إن لم تسمع شيئًا فارفع صوت الوسائط" }
-                            ?: "تمّ التشغيل عبر ${spoken.providerId}"
+                    val volume = if (spoken.mediaVolume >= 0) " · صوت الوسائط ${spoken.mediaVolume}/${spoken.mediaMax}" else ""
+                    when {
+                        spoken.unheard ->
+                            "وصل الصوت وشُغّل، لكن صوت الوسائط في هاتفك صفر (0/${spoken.mediaMax}). " +
+                                "ارفعه بأزرار الصوت، وإن كان الهاتف في الوضع الصامت فأوقفه أو عطّل «كتم الوسائط» فيه."
+                        spoken.fellBack ->
+                            listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ") + volume
+                        else -> "تمّ التشغيل: ${spoken.detail ?: spoken.providerId}$volume"
                     }
                 },
                 onFailure = { it.message ?: "تعذّر النطق" },
@@ -300,7 +301,7 @@ class SettingsViewModel @Inject constructor(
             _ui.value = _ui.value.copy(
                 speaking = false,
                 voiceResult = message,
-                voiceOk = result.getOrNull()?.fellBack == false,
+                voiceOk = result.getOrNull()?.let { !it.fellBack && !it.unheard } ?: false,
             )
         }
     }

@@ -63,7 +63,28 @@ class VoiceEngine @Inject constructor(
         val reason: String? = null,
         /** What was actually played, when the provider can say. */
         val detail: String? = null,
-    )
+        /** The phone's media volume when this was spoken; -1 when unknown. */
+        val mediaVolume: Int = -1,
+        val mediaMax: Int = 0,
+    ) {
+        /** Spoken into a muted phone: correct audio that nobody could hear. */
+        val unheard: Boolean get() = mediaVolume == 0
+    }
+
+    /**
+     * The media volume right now, as (level, max). Speech plays on the media
+     * stream, so at zero — which a phone's silent mode can force — every
+     * voice "works" and nothing is heard.
+     */
+    private fun mediaVolume(): Pair<Int, Int> = runCatching {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val level = if (audioManager.isStreamMute(AudioManager.STREAM_MUSIC)) {
+            0
+        } else {
+            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        }
+        level to max
+    }.getOrDefault(-1 to 0)
 
     /**
      * Speak [text]. Returns which provider was used.
@@ -107,7 +128,10 @@ class VoiceEngine @Inject constructor(
                 try {
                     active = provider
                     provider.speak(text, voice, pitch, rate, onAmplitude)
-                    return SpokenBy(provider.id, fellBack, reason, (provider as? GroqTtsProvider)?.lastDetail)
+                    val (level, max) = mediaVolume()
+                    return SpokenBy(
+                        provider.id, fellBack, reason, (provider as? GroqTtsProvider)?.lastDetail, level, max,
+                    )
                 } catch (e: CancellationException) {
                     throw e // a cancelled utterance is not a provider failure
                 } catch (e: Throwable) {
