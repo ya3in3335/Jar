@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.jarvis.ai.core.net.ModelProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -17,22 +18,35 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 /** Non-secret user settings. Secrets live in [SecureStore]. */
 data class JarvisSettings(
-    val model: String = "anthropic/claude-3.5-haiku",
+    /** "groq" or "openrouter" — see [ModelProvider]. */
+    val provider: String = ModelProvider.GROQ.id,
+    /** The model for the current provider; each provider remembers its own. */
+    val model: String = ModelProvider.GROQ.defaultModel,
     val routingMode: String = "balanced", // economy | balanced | quality
     /** "deepgram" for live streaming recognition, "off" to type only. */
     val sttEngine: String = "deepgram",
     /** Recognition language: "ar", "multi", "en", "fr". */
     val sttLanguage: String = "ar",
     /**
-     * "azure" talks to Azure directly with a key on this device (no server
-     * needed), "relay" goes through a paired backend, "system" is the
-     * phone's own engine.
+     * "groq" speaks Arabic and English on the Groq key, "azure" talks to
+     * Azure directly with its own key, "relay" goes through a paired
+     * backend, "system" is the phone's own engine.
      */
-    val voiceProvider: String = "azure",
-    val voice: String = "ar-DZ-IsmaelNeural",
+    val voiceProvider: String = "groq",
+    val voice: String = "groq-ar-fahad",
     val voicePitch: String = "-15Hz",
     val voiceRate: String = "-8%",
     val autoSpeak: Boolean = true,
+    /** Show the head floating over other apps (needs the accessibility service). */
+    val floatingAvatar: Boolean = true,
+    /** Attach what is on screen to every request, so he sees without being told to look. */
+    val screenAware: Boolean = true,
+    /**
+     * Look at newly opened screens unprompted and comment when it is worth
+     * it. Off until asked for: it sends screen text to the model provider
+     * on its own, and spends the provider's quota doing so.
+     */
+    val watchScreen: Boolean = false,
     val wakeWordEnabled: Boolean = false,
     val reducedMotion: Boolean = false,
     val confirmSensitiveActions: Boolean = true,
@@ -46,22 +60,39 @@ data class JarvisSettings(
     // high cap mostly buys a longer wait.
     val maxOutputTokens: Int = 400,
     val language: String = "ar",
-)
+) {
+    val modelProvider: ModelProvider get() = ModelProvider.fromId(provider)
+}
 
 @Singleton
 class SettingsStore @Inject constructor(private val context: Context) {
 
     val settings: Flow<JarvisSettings> = context.dataStore.data.map { p ->
+        val provider = ModelProvider.fromId(p[Keys.PROVIDER])
         JarvisSettings(
-            model = p[Keys.MODEL] ?: JarvisSettings().model,
+            provider = provider.id,
+            model = when (provider) {
+                ModelProvider.GROQ -> p[Keys.MODEL_GROQ]
+                // A paid model saved by an older build is ignored, not sent.
+                ModelProvider.OPENROUTER -> p[Keys.MODEL]?.takeIf { ModelProvider.isFreeOpenRouterModel(it) }
+            } ?: provider.defaultModel,
             routingMode = p[Keys.ROUTING] ?: JarvisSettings().routingMode,
             sttEngine = p[Keys.STT_ENGINE] ?: JarvisSettings().sttEngine,
             sttLanguage = p[Keys.STT_LANGUAGE] ?: JarvisSettings().sttLanguage,
-            voiceProvider = p[Keys.VOICE_PROVIDER] ?: JarvisSettings().voiceProvider,
-            voice = p[Keys.VOICE] ?: JarvisSettings().voice,
+            // Deepgram no longer speaks (it is recognition-only), so a
+            // saved Deepgram voice moves to Groq's English one.
+            voiceProvider = p[Keys.VOICE_PROVIDER]?.takeUnless { it.startsWith("deepgram") }
+                ?: JarvisSettings().voiceProvider,
+            voice = when {
+                p[Keys.VOICE_PROVIDER]?.startsWith("deepgram") == true -> "groq-en-troy"
+                else -> p[Keys.VOICE] ?: JarvisSettings().voice
+            },
             voicePitch = p[Keys.PITCH] ?: JarvisSettings().voicePitch,
             voiceRate = p[Keys.RATE] ?: JarvisSettings().voiceRate,
             autoSpeak = p[Keys.AUTO_SPEAK] ?: JarvisSettings().autoSpeak,
+            floatingAvatar = p[Keys.FLOATING] ?: JarvisSettings().floatingAvatar,
+            screenAware = p[Keys.SCREEN_AWARE] ?: JarvisSettings().screenAware,
+            watchScreen = p[Keys.WATCH_SCREEN] ?: JarvisSettings().watchScreen,
             wakeWordEnabled = p[Keys.WAKE_WORD] ?: JarvisSettings().wakeWordEnabled,
             reducedMotion = p[Keys.REDUCED_MOTION] ?: JarvisSettings().reducedMotion,
             confirmSensitiveActions = p[Keys.CONFIRM] ?: JarvisSettings().confirmSensitiveActions,
@@ -71,7 +102,15 @@ class SettingsStore @Inject constructor(private val context: Context) {
         )
     }
 
-    suspend fun setModel(value: String) = edit { it[Keys.MODEL] = value }
+    suspend fun setProvider(value: ModelProvider) = edit { it[Keys.PROVIDER] = value.id }
+
+    /** Stores [value] for the current provider; a model it does not allow is dropped. */
+    suspend fun setModel(value: String) = edit {
+        val provider = ModelProvider.fromId(it[Keys.PROVIDER])
+        if (provider.allows(value)) {
+            it[if (provider == ModelProvider.GROQ) Keys.MODEL_GROQ else Keys.MODEL] = value
+        }
+    }
     suspend fun setRoutingMode(value: String) = edit { it[Keys.ROUTING] = value }
     suspend fun setSttEngine(value: String) = edit { it[Keys.STT_ENGINE] = value }
     suspend fun setSttLanguage(value: String) = edit { it[Keys.STT_LANGUAGE] = value }
@@ -80,6 +119,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
     suspend fun setPitch(value: String) = edit { it[Keys.PITCH] = value }
     suspend fun setRate(value: String) = edit { it[Keys.RATE] = value }
     suspend fun setAutoSpeak(value: Boolean) = edit { it[Keys.AUTO_SPEAK] = value }
+    suspend fun setFloatingAvatar(value: Boolean) = edit { it[Keys.FLOATING] = value }
+    suspend fun setScreenAware(value: Boolean) = edit { it[Keys.SCREEN_AWARE] = value }
+    suspend fun setWatchScreen(value: Boolean) = edit { it[Keys.WATCH_SCREEN] = value }
     suspend fun setWakeWord(value: Boolean) = edit { it[Keys.WAKE_WORD] = value }
     suspend fun setReducedMotion(value: Boolean) = edit { it[Keys.REDUCED_MOTION] = value }
     suspend fun setConfirmSensitive(value: Boolean) = edit { it[Keys.CONFIRM] = value }
@@ -91,7 +133,10 @@ class SettingsStore @Inject constructor(private val context: Context) {
     }
 
     private object Keys {
+        val PROVIDER = stringPreferencesKey("model_provider")
+        /** OpenRouter's model; the key predates the provider choice. */
         val MODEL = stringPreferencesKey("model")
+        val MODEL_GROQ = stringPreferencesKey("model_groq")
         val ROUTING = stringPreferencesKey("routing_mode")
         val STT_ENGINE = stringPreferencesKey("stt_engine")
         val STT_LANGUAGE = stringPreferencesKey("stt_language")
@@ -100,6 +145,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
         val PITCH = stringPreferencesKey("voice_pitch")
         val RATE = stringPreferencesKey("voice_rate")
         val AUTO_SPEAK = booleanPreferencesKey("auto_speak")
+        val FLOATING = booleanPreferencesKey("floating_avatar")
+        val SCREEN_AWARE = booleanPreferencesKey("screen_aware")
+        val WATCH_SCREEN = booleanPreferencesKey("watch_screen")
         val WAKE_WORD = booleanPreferencesKey("wake_word")
         val REDUCED_MOTION = booleanPreferencesKey("reduced_motion")
         val CONFIRM = booleanPreferencesKey("confirm_sensitive")

@@ -27,8 +27,7 @@ class VoiceEngine @Inject constructor(
     private val system = SystemTtsProvider(context)
     private val azureStream = AzureStreamingTts(http, secureStore)
     private val azure = AzureTtsProvider(http, secureStore, context.cacheDir)
-    private val deepgramStream = DeepgramStreamingTts(http, secureStore)
-    private val deepgram = DeepgramTtsProvider(http, secureStore, context.cacheDir)
+    private val groq = GroqTtsProvider(http, secureStore)
     private val relay = RelayTtsProvider(http, secureStore, context.cacheDir)
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -41,33 +40,56 @@ class VoiceEngine @Inject constructor(
     /**
      * Providers for the settings picker, best first.
      *
-     * Azure-direct leads because the no-server setup is the default: it
-     * gives the Algerian neural voice with only a key. The relay is for a
-     * paired backend, and the device engine always works as a last resort.
+     * Groq leads because it speaks Arabic and English on the key the model
+     * already needs. Azure-direct gives the Algerian neural voice with its
+     * own key, the relay is for a paired backend, and the device engine
+     * always works as a last resort.
+     *
+     * Deepgram is not here: it is used for recognition only.
      */
     val providers: List<TtsProvider>
-        get() = listOf(azureStream, azure, deepgramStream, deepgram, relay, system)
+        get() = listOf(groq, azureStream, azure, relay, system)
 
     suspend fun availableProviders(): List<TtsProvider> = providers.filter { it.isAvailable() }
 
     /**
-     * Delivery register, for the Deepgram voices that have one.
-     *
-     * Flux-only, and Deepgram says so plainly: Aura-2 ignores it. Kept in
-     * one place so both the streaming and REST paths agree.
+     * [reason] says why the chosen provider did not speak when another one
+     * had to. Without it a broken cloud voice is invisible: the phone's
+     * engine takes over, or nothing is heard, and nothing says why.
      */
-    fun setExpressivity(value: Int) {
-        val clamped = value.coerceIn(-2, 2)
-        deepgramStream.expressivity = clamped
-        deepgram.expressivity = clamped
+    data class SpokenBy(
+        val providerId: String,
+        val fellBack: Boolean,
+        val reason: String? = null,
+        /** What was actually played, when the provider can say. */
+        val detail: String? = null,
+        /** The phone's media volume when this was spoken; -1 when unknown. */
+        val mediaVolume: Int = -1,
+        val mediaMax: Int = 0,
+    ) {
+        /** Spoken into a muted phone: correct audio that nobody could hear. */
+        val unheard: Boolean get() = mediaVolume == 0
     }
 
-    data class SpokenBy(val providerId: String, val fellBack: Boolean)
+    /**
+     * The media volume right now, as (level, max). Speech plays on the media
+     * stream, so at zero — which a phone's silent mode can force — every
+     * voice "works" and nothing is heard.
+     */
+    private fun mediaVolume(): Pair<Int, Int> = runCatching {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val level = if (audioManager.isStreamMute(AudioManager.STREAM_MUSIC)) {
+            0
+        } else {
+            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        }
+        level to max
+    }.getOrDefault(-1 to 0)
 
     /**
      * Speak [text]. Returns which provider was used.
      *
-     * @param preferredProviderId "relay", "system", or null to pick the best.
+     * @param preferredProviderId "groq", "azure", "relay", "system", or null to pick the best.
      */
     suspend fun speak(
         text: String,
@@ -79,38 +101,42 @@ class VoiceEngine @Inject constructor(
     ): SpokenBy {
         if (text.isBlank()) return SpokenBy("none", false)
 
-        // The streaming socket is tried before the REST endpoint for every
-        // Deepgram choice: same voices, same key, but the first sound
-        // arrives while the sentence is still being synthesised instead of
-        // after. REST stays behind it, so a blocked WebSocket still speaks.
+        // The chosen provider first, then the others, so a failed call
+        // still speaks. For Azure the streaming endpoint is tried before the
+        // file-based one: same voice, but the first sound arrives sooner.
         val ordered = when (preferredProviderId) {
-            "system" -> listOf(system, azureStream, azure, deepgramStream, deepgram, relay)
-            "azure", "azure-stream" ->
-                listOf(azureStream, azure, relay, deepgramStream, deepgram, system)
-            "deepgram", "deepgram-stream" ->
-                listOf(deepgramStream, deepgram, azureStream, azure, system)
-            "relay" -> listOf(relay, azureStream, azure, deepgramStream, deepgram, system)
-            else -> listOf(azureStream, azure, deepgramStream, deepgram, relay, system)
+            "system" -> listOf(system, groq, azureStream, azure, relay)
+            "azure", "azure-stream" -> listOf(azureStream, azure, relay, groq, system)
+            "relay" -> listOf(relay, azureStream, azure, groq, system)
+            else -> listOf(groq, azureStream, azure, relay, system)
         }
 
         requestFocus()
         try {
             var fellBack = false
             var lastError: Throwable? = null
+            // Why the first choice did not speak — the one the user picked,
+            // so the one whose failure is worth showing.
+            var reason: String? = null
 
-            for (provider in ordered) {
+            for ((index, provider) in ordered.withIndex()) {
                 if (!provider.isAvailable()) {
+                    if (index == 0) reason = "${provider.label}: غير مهيّأ (لا مفتاح محفوظ له)"
                     fellBack = true
                     continue
                 }
                 try {
                     active = provider
                     provider.speak(text, voice, pitch, rate, onAmplitude)
-                    return SpokenBy(provider.id, fellBack)
+                    val (level, max) = mediaVolume()
+                    return SpokenBy(
+                        provider.id, fellBack, reason, (provider as? GroqTtsProvider)?.lastDetail, level, max,
+                    )
                 } catch (e: CancellationException) {
                     throw e // a cancelled utterance is not a provider failure
                 } catch (e: Throwable) {
                     lastError = e
+                    if (reason == null) reason = e.message
                     fellBack = true
                 } finally {
                     active = null
@@ -118,7 +144,7 @@ class VoiceEngine @Inject constructor(
             }
 
             throw TtsException(
-                lastError?.message ?: "لا يوجد محرّك نطق متاح على هذا الجهاز",
+                reason ?: lastError?.message ?: "لا يوجد محرّك نطق متاح على هذا الجهاز",
                 lastError,
             )
         } finally {

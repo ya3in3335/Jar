@@ -4,7 +4,7 @@ import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
 const EMBED=/embed/.test(location.hash)||!!window.JARVIS_EMBED;
-if(EMBED)document.body.classList.add('embed');
+if(EMBED){document.documentElement.classList.add('embed');document.body.classList.add('embed');}
 const damp=(c,t,l,dt)=>c+(t-c)*(1-Math.exp(-l*dt)), clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const $=id=>document.getElementById(id);
 

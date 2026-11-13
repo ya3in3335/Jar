@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.jarvis.ai.core.net.ModelProvider
 import com.jarvis.ai.R
 import com.jarvis.ai.core.agent.JarvisAccessibilityService
 import com.jarvis.ai.ui.theme.BgPanel
@@ -99,6 +100,25 @@ fun SettingsScreen(
         // ------------------------------------------------- AI provider
         Section(title = stringRes(R.string.settings_provider)) {
             var keyInput by rememberSaveable { mutableStateOf("") }
+            val provider = settings.modelProvider
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (option in ModelProvider.entries) {
+                    FilterChip(
+                        selected = provider == option,
+                        onClick = {
+                            viewModel.setProvider(option)
+                            keyInput = ""
+                        },
+                        label = {
+                            Text(
+                                if (option == ModelProvider.OPENROUTER) "${option.label} (المجاني فقط)" else option.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        },
+                    )
+                }
+            }
 
             Text(
                 stringRes(R.string.settings_api_key_help),
@@ -113,8 +133,8 @@ fun SettingsScreen(
             OutlinedTextField(
                 value = keyInput,
                 onValueChange = { keyInput = it },
-                label = { Text(stringRes(R.string.settings_api_key)) },
-                placeholder = { Text("sk-or-...", color = TextDim) },
+                label = { Text("${stringRes(R.string.settings_api_key)} ${provider.label}") },
+                placeholder = { Text("${provider.keyPrefix}...", color = TextDim) },
                 // The key is never rendered back in clear text.
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
@@ -157,7 +177,11 @@ fun SettingsScreen(
         Section(title = stringRes(R.string.settings_model)) {
             Text(settings.model, style = MaterialTheme.typography.bodyMedium)
             Text(
-                "استدعاء الأدوات يحتاج نموذجًا يدعمه. اضغط لتحميل النماذج التي تدعمه فعلًا.",
+                if (settings.modelProvider == ModelProvider.OPENROUTER) {
+                    "تُعرَض نماذج OpenRouter المجانية فقط؛ النماذج المدفوعة مرفوضة ولا تُرسَل."
+                } else {
+                    "استدعاء الأدوات يحتاج نموذجًا يدعمه. اضغط لتحميل نماذج Groq المتاحة لمفتاحك."
+                },
                 color = TextDim,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -171,9 +195,9 @@ fun SettingsScreen(
                 }
             }
 
-            val choices = ui.toolCapableModels.map { it.id }.ifEmpty { viewModel.suggestedModels }
+            val choices = ui.toolCapableModels.map { it.id }.ifEmpty { settings.modelProvider.suggestedModels }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (id in choices.take(12)) {
+                for (id in choices.take(24)) {
                     FilterChip(
                         selected = settings.model == id,
                         onClick = { viewModel.setModel(id) },
@@ -183,7 +207,7 @@ fun SettingsScreen(
             }
             if (ui.toolCapableModels.isEmpty()) {
                 Text(
-                    "القائمة أعلاه مقترحات مجانية لم تُتحقَّق من هذا الجهاز بعد.",
+                    "القائمة أعلاه مقترحات لم تُتحقَّق من هذا الجهاز بعد.",
                     color = TextDim,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -292,17 +316,20 @@ fun SettingsScreen(
         Section(title = stringRes(R.string.settings_voice)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
-                    selected = settings.voiceProvider == "azure",
-                    onClick = { viewModel.setVoiceProvider("azure") },
-                    label = { Text("إسماعيل (أزور مباشرة)") },
+                    selected = settings.voiceProvider == "groq",
+                    onClick = {
+                        viewModel.setVoiceProvider("groq")
+                        if (!settings.voice.startsWith("groq-")) viewModel.setVoice("groq-ar-fahad")
+                    },
+                    label = { Text("Groq (عربي وإنجليزي)") },
                 )
                 FilterChip(
-                    selected = settings.voiceProvider == "deepgram",
+                    selected = settings.voiceProvider == "azure",
                     onClick = {
-                        viewModel.setVoiceProvider("deepgram")
-                        viewModel.setVoice("aura-2-thalia-en")
+                        viewModel.setVoiceProvider("azure")
+                        if (settings.voice.startsWith("groq-")) viewModel.setVoice("ar-DZ-IsmaelNeural")
                     },
-                    label = { Text("ديبڨرام (إنجليزي)") },
+                    label = { Text("إسماعيل (أزور)") },
                 )
                 FilterChip(
                     selected = settings.voiceProvider == "relay",
@@ -317,10 +344,10 @@ fun SettingsScreen(
             }
 
             Text(
-                if (settings.voiceProvider == "deepgram") {
-                    "أصوات ديبڨرام إنجليزية — لا يملك أي صوت عربي. " +
-                        "لذلك سيردّ جارفيس بالإنجليزية أيضًا، لأن صوتًا إنجليزيًا يقرأ نصًّا عربيًا يخرج كلامًا مشوّهًا. " +
-                        "يستعمل نفس مفتاح ديبڨرام، ودرجة الصوت وسرعته تُطبَّقان عند التشغيل."
+                if (settings.voiceProvider == "groq") {
+                    "أصوات Groq بنفس مفتاح Groq: ستة عربية (بلهجة سعودية) وستة إنجليزية. " +
+                        "إن اخترت صوتًا إنجليزيًا سيردّ جارفيس بالإنجليزية، لأن صوتًا إنجليزيًا يقرأ نصًّا عربيًا يخرج كلامًا مشوّهًا. " +
+                        "درجة الصوت وسرعته تُطبَّقان عند التشغيل."
                 } else if (settings.voiceProvider == "azure") {
                     "يتّصل بأزور مباشرة بمفتاحك. إن تعذّر، ينطق محرّك الهاتف تلقائيًا."
                 } else if (settings.voiceProvider == "relay") {
@@ -416,6 +443,20 @@ fun SettingsScreen(
                 )
             }
 
+            // Right under the button: the result used to appear only at the
+            // top of this long screen, where nobody pressing the button sees it.
+            ui.voiceResult?.let { result ->
+                Text(
+                    result,
+                    color = when (ui.voiceOk) {
+                        true -> SuccessGreen
+                        false -> WarnAmber
+                        null -> TextDim
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
             ToggleRow(
                 label = stringRes(R.string.settings_auto_speak),
                 checked = settings.autoSpeak,
@@ -480,6 +521,39 @@ fun SettingsScreen(
                     }
                 }) { Text("افتح إعدادات إمكانية الوصول") }
             }
+
+            ToggleRow(
+                label = "جارفيس العائم فوق التطبيقات",
+                checked = settings.floatingAvatar,
+                onChange = viewModel::setFloatingAvatar,
+            )
+            Text(
+                "رأس جارفيس يظهر فوق الشاشة الرئيسية وباقي التطبيقات. نقرة: يسمعك. " +
+                    "ضغطة مطوّلة: يحلّل الشاشة. اسحبه لتحريكه.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            ToggleRow(
+                label = "يرى الشاشة مع كل طلب",
+                checked = settings.screenAware,
+                onChange = viewModel::setScreenAware,
+            )
+            Text(
+                "يُرفَق نصّ الشاشة الحالية بكل طلب، فلا تحتاج أن تقول له «شوف». حقول كلمات السر لا تُقرأ.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            ToggleRow(
+                label = "يراقب ويعلّق من نفسه",
+                checked = settings.watchScreen,
+                onChange = viewModel::setWatchScreen,
+            )
+            Text(
+                "عند فتح تطبيق جديد ينظر إلى الشاشة دون أن تطلب، ويتكلّم فقط إن وجد ما يستحق. " +
+                    "تنبيه: يرسل نصّ شاشتك إلى مزوّد النموذج تلقائيًا (مرّة في الدقيقة على الأكثر) ويستهلك من حصّتك.",
+                color = WarnAmber,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
 
         // -------------------------------------------------- appearance

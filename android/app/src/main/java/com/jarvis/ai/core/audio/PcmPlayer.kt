@@ -45,8 +45,11 @@ class PcmPlayer(private val sampleRate: Int) {
 
         val built = AudioTrack.Builder()
             .setAudioAttributes(
+                // Media, not assistant: the reply then follows the volume
+                // keys like any other sound. The assistant usage can land on
+                // a stream the user has no control over, and play unheard.
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
@@ -63,9 +66,16 @@ class PcmPlayer(private val sampleRate: Int) {
 
         runCatching {
             built.playbackParams = built.playbackParams
-                .setSpeed(DeepgramTtsProvider.speedFor(rate))
-                .setPitch(DeepgramTtsProvider.pitchFor(pitch))
+                .setSpeed(speedFor(rate))
+                .setPitch(pitchFor(pitch))
         }.onFailure { Log.w(TAG, "playback params unsupported: ${it.javaClass.simpleName}") }
+
+        // A track that failed to open accepts writes and plays nothing;
+        // say so here rather than "speaking" in silence.
+        if (built.state != AudioTrack.STATE_INITIALIZED) {
+            runCatching { built.release() }
+            throw IllegalStateException("تعذّر فتح مخرج الصوت ($sampleRate Hz)")
+        }
 
         built.play()
         track = built
@@ -82,6 +92,12 @@ class PcmPlayer(private val sampleRate: Int) {
         val player = track ?: return 0f
         val count = player.write(bytes, 0, length, AudioTrack.WRITE_BLOCKING)
         if (count > 0) written += count
+        // A negative count is an error code. If the track is still ours the
+        // audio is not reaching the speaker, and that must not pass for
+        // success; if it was stopped meanwhile, the error is just the stop.
+        if (count < 0 && track === player) {
+            throw IllegalStateException("فشلت الكتابة إلى مخرج الصوت (رمز $count)")
+        }
         return levelOf(bytes, length)
     }
 
@@ -114,6 +130,18 @@ class PcmPlayer(private val sampleRate: Int) {
     }
 
     companion object {
+        /** "-8%" onto the 0.5..2 playback multiplier AudioTrack accepts. */
+        fun speedFor(rate: String): Float {
+            val percent = rate.removeSuffix("%").toFloatOrNull() ?: return 1f
+            return (1f + percent / 100f).coerceIn(0.5f, 2.0f)
+        }
+
+        /** "-15Hz" onto a playback pitch multiplier. */
+        fun pitchFor(pitch: String): Float {
+            val hz = pitch.removeSuffix("Hz").toFloatOrNull() ?: return 1f
+            return (1f + hz / 100f).coerceIn(0.5f, 2.0f)
+        }
+
         private const val TAG = "PcmPlayer"
         private const val CHANNEL = AudioFormat.CHANNEL_OUT_MONO
         private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT

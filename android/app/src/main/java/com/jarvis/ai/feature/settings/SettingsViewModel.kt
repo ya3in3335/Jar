@@ -2,6 +2,7 @@ package com.jarvis.ai.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.jarvis.ai.core.audio.GroqTtsProvider
 import com.jarvis.ai.core.audio.VoiceEngine
 import com.jarvis.ai.core.audio.VoiceOption
 import com.jarvis.ai.core.data.JarvisSettings
@@ -10,6 +11,7 @@ import com.jarvis.ai.core.data.SettingsStore
 import com.jarvis.ai.core.audio.AzureTtsProvider
 import com.jarvis.ai.core.net.JarvisBackend
 import com.jarvis.ai.core.net.ModelCapabilities
+import com.jarvis.ai.core.net.ModelProvider
 import com.jarvis.ai.core.stt.AutoSttSessionProvider
 import com.jarvis.ai.core.net.OpenRouterClient
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -39,6 +41,9 @@ data class SettingsUiState(
     val sttCheck: String? = null,
     val sttCheckOk: Boolean? = null,
     val speaking: Boolean = false,
+    /** Outcome of the last voice preview, shown beside its button. */
+    val voiceResult: String? = null,
+    val voiceOk: Boolean? = null,
     val notice: String? = null,
 )
 
@@ -54,7 +59,7 @@ class SettingsViewModel @Inject constructor(
 
     private val _ui = MutableStateFlow(
         SettingsUiState(
-            hasApiKey = !secureStore.openRouterKey.isNullOrBlank(),
+            hasApiKey = !secureStore.modelKey(ModelProvider.GROQ).isNullOrBlank(),
             secureStorageAvailable = secureStore.isAvailable,
             backendPaired = backend.isPaired,
             hasDeepgramKey = !secureStore.deepgramKey.isNullOrBlank(),
@@ -67,17 +72,38 @@ class SettingsViewModel @Inject constructor(
     val settings: StateFlow<JarvisSettings> =
         settingsStore.settings.stateIn(viewModelScope, SharingStarted.Eagerly, JarvisSettings())
 
-    val suggestedModels: List<String> = ModelCapabilities.SUGGESTED_FREE
+    private val provider: ModelProvider get() = settings.value.modelProvider
+
+    init {
+        // Everything on this screen about "the key" means the current provider's.
+        viewModelScope.launch {
+            settings.collect { _ui.value = _ui.value.copy(hasApiKey = !secureStore.modelKey(provider).isNullOrBlank()) }
+        }
+    }
+
+    // -------------------------------------------------------- the provider
+
+    fun setProvider(value: ModelProvider) {
+        if (value == provider) return
+        _ui.value = _ui.value.copy(
+            hasApiKey = !secureStore.modelKey(value).isNullOrBlank(),
+            testResult = null,
+            testOk = null,
+            toolCapableModels = emptyList(),
+        )
+        viewModelScope.launch { settingsStore.setProvider(value) }
+    }
 
     // ------------------------------------------------------------- the key
 
     fun saveApiKey(key: String) {
         val trimmed = key.trim()
         if (trimmed.isEmpty()) return
+        val target = provider
 
-        if (!trimmed.startsWith("sk-or-")) {
+        if (!trimmed.startsWith(target.keyPrefix)) {
             _ui.value = _ui.value.copy(
-                notice = "مفتاح OpenRouter يبدأ عادةً بـ sk-or- — تأكّد أنك نسخته كاملًا",
+                notice = "مفتاح ${target.label} يبدأ عادةً بـ ${target.keyPrefix} — تأكّد أنك نسخته كاملًا",
             )
             return
         }
@@ -88,17 +114,18 @@ class SettingsViewModel @Inject constructor(
             return
         }
 
-        secureStore.openRouterKey = trimmed
+        secureStore.setModelKey(target, trimmed)
         _ui.value = _ui.value.copy(hasApiKey = true, notice = "حُفظ المفتاح مشفّرًا على هذا الجهاز", testResult = null)
     }
 
     fun clearApiKey() {
-        secureStore.openRouterKey = null
+        secureStore.setModelKey(provider, null)
         _ui.value = _ui.value.copy(hasApiKey = false, testResult = null, toolCapableModels = emptyList())
     }
 
     fun testConnection() {
-        val key = secureStore.openRouterKey
+        val target = provider
+        val key = secureStore.modelKey(target)
         if (key.isNullOrBlank()) {
             _ui.value = _ui.value.copy(testOk = false, testResult = "لا يوجد مفتاح محفوظ")
             return
@@ -106,7 +133,7 @@ class SettingsViewModel @Inject constructor(
         _ui.value = _ui.value.copy(testing = true, testResult = null, testOk = null)
 
         viewModelScope.launch {
-            val result = openRouter.testConnection(key, settings.value.model)
+            val result = openRouter.testConnection(target, key, settings.value.model)
             _ui.value = _ui.value.copy(
                 testing = false,
                 testOk = result.isSuccess,
@@ -117,11 +144,12 @@ class SettingsViewModel @Inject constructor(
 
     /** Load the models that actually support tool calling. */
     fun loadModels() {
-        val key = secureStore.openRouterKey ?: return
+        val target = provider
+        val key = secureStore.modelKey(target) ?: return
         _ui.value = _ui.value.copy(loadingModels = true)
 
         viewModelScope.launch {
-            val models = runCatching { openRouter.toolCapableModels(key) }.getOrDefault(emptyList())
+            val models = runCatching { openRouter.toolCapableModels(target, key) }.getOrDefault(emptyList())
             _ui.value = _ui.value.copy(
                 loadingModels = false,
                 toolCapableModels = models.sortedBy { it.id },
@@ -239,27 +267,41 @@ class SettingsViewModel @Inject constructor(
             _ui.value = _ui.value.copy(speaking = false)
             return
         }
-        _ui.value = _ui.value.copy(speaking = true, notice = null)
+        _ui.value = _ui.value.copy(speaking = true, notice = null, voiceResult = "جاري طلب الصوت…", voiceOk = null)
 
         viewModelScope.launch {
             val current = settings.value
             val result = runCatching {
                 voice.speak(
-                    text = "مرحبًا، أنا جارفيس. جاهز لتنفيذ أوامرك.",
+                    text = if (GroqTtsProvider.isEnglishVoice(current.voice)) {
+                        "Hello, I am Jarvis. Ready when you are."
+                    } else {
+                        "مرحبًا، أنا جارفيس. جاهز لتنفيذ أوامرك."
+                    },
                     voice = current.voice,
                     pitch = current.voicePitch,
                     rate = current.voiceRate,
                     preferredProviderId = current.voiceProvider,
                 )
             }
+            val message = result.fold(
+                onSuccess = { spoken ->
+                    val volume = if (spoken.mediaVolume >= 0) " · صوت الوسائط ${spoken.mediaVolume}/${spoken.mediaMax}" else ""
+                    when {
+                        spoken.unheard ->
+                            "وصل الصوت وشُغّل، لكن صوت الوسائط في هاتفك صفر (0/${spoken.mediaMax}). " +
+                                "ارفعه بأزرار الصوت، وإن كان الهاتف في الوضع الصامت فأوقفه أو عطّل «كتم الوسائط» فيه."
+                        spoken.fellBack ->
+                            listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ") + volume
+                        else -> "تمّ التشغيل: ${spoken.detail ?: spoken.providerId}$volume"
+                    }
+                },
+                onFailure = { it.message ?: "تعذّر النطق" },
+            )
             _ui.value = _ui.value.copy(
                 speaking = false,
-                notice = result.fold(
-                    onSuccess = { spoken ->
-                        if (spoken.fellBack) "تحدّث بمحرّك بديل: ${spoken.providerId}" else null
-                    },
-                    onFailure = { it.message ?: "تعذّر النطق" },
-                ),
+                voiceResult = message,
+                voiceOk = result.getOrNull()?.let { !it.fellBack && !it.unheard } ?: false,
             )
         }
     }
@@ -272,6 +314,9 @@ class SettingsViewModel @Inject constructor(
     fun setPitch(value: String) = viewModelScope.launch { settingsStore.setPitch(value) }
     fun setRate(value: String) = viewModelScope.launch { settingsStore.setRate(value) }
     fun setAutoSpeak(value: Boolean) = viewModelScope.launch { settingsStore.setAutoSpeak(value) }
+    fun setFloatingAvatar(value: Boolean) = viewModelScope.launch { settingsStore.setFloatingAvatar(value) }
+    fun setScreenAware(value: Boolean) = viewModelScope.launch { settingsStore.setScreenAware(value) }
+    fun setWatchScreen(value: Boolean) = viewModelScope.launch { settingsStore.setWatchScreen(value) }
     fun setReducedMotion(value: Boolean) = viewModelScope.launch { settingsStore.setReducedMotion(value) }
     fun setConfirmSensitive(value: Boolean) = viewModelScope.launch { settingsStore.setConfirmSensitive(value) }
     fun setMaxToolCalls(value: Int) = viewModelScope.launch { settingsStore.setMaxToolCalls(value.coerceIn(1, 20)) }

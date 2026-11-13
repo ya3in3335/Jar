@@ -199,3 +199,82 @@ cannot reach the network and the app stays usable offline.
   examples (a Ready Player Me avatar and Mixamo motion). They are fine for
   development; swap `models/jarvis.glb` for an avatar you own before a public
   release.
+
+## D14 — Groq is the default brain; OpenRouter is free-models-only
+
+The app now talks to two providers through the one chat client, chosen in
+settings: **Groq** (default) and **OpenRouter**. Both speak the OpenAI
+chat-completions dialect, so only the base URL, the key and the model list
+differ (`ModelProvider`). Each provider keeps its own key and its own chosen
+model.
+
+OpenRouter is limited to free models: the `:free` variants and the
+`openrouter/free` router. This is enforced in three places so it cannot be
+bypassed by accident — the picker lists only free models, the settings store
+ignores a paid id (including one saved by an older build), and the client
+refuses a paid id before sending anything. The old default,
+`anthropic/claude-3.5-haiku`, was a paid model.
+
+Web search moved with it. It used OpenRouter's `:online` plugin on
+`gpt-4o-mini`, which bills per search; it now uses Groq's server-side
+`browser_search` tool on `openai/gpt-oss-20b`, so it needs the Groq key.
+
+Not verified: whether Groq's free tier includes `browser_search`, and how its
+rate limits feel in a long tool chain. Neither could be tested without a key.
+
+## D15 — Groq speaks; Deepgram only listens
+
+Speech output moved to Groq's Orpheus voices: six Arabic (Saudi dialect) and
+six English, on the Groq key the model already uses. It is the default voice
+provider. Azure (the Algerian voice), the relay and the phone's engine remain
+as choices and as fallbacks.
+
+Deepgram's speech providers were removed, so Deepgram is used for recognition
+only. A saved Deepgram voice moves to Groq's English one.
+
+What the service imposes, and how it is handled in `GroqTtsProvider`:
+
+- 200 characters per request: replies are cut at sentence, comma and word
+  boundaries, and the next piece is fetched while the current one plays.
+- WAV is the only format: the header is parsed for the sample rate instead of
+  assuming one.
+- No pitch or rate parameter: the user's values are applied at playback.
+
+Not verified, for want of a key: the real WAV the service returns, how the
+gap between pieces sounds, and the free-tier limits for speech. Groq has no
+Algerian-dialect voice.
+
+## D16 — He floats over other apps and sees the screen without being told
+
+Three changes that belong together.
+
+**The head floats.** The accessibility service draws the 3D head as an
+accessibility overlay over the home screen and every other app, so no
+"display over other apps" permission is added. Tap: listen (or cancel).
+Long press: look at the screen now. Drag: move. The window is never
+focusable, and it hides while the app itself is open. The page's background
+is now fully transparent (the `html` element used to stay dark).
+
+**One assistant, two faces.** The assistant moved out of `HomeViewModel`
+into `JarvisBrain`, a process-wide singleton, so the overlay and the home
+screen show and drive the same conversation, and a request made from the
+overlay keeps running with no activity open.
+
+**He sees without being asked.** With the accessibility service on, the text
+of the current screen is attached to every request (`ScreenContext.wrap`), so
+"what is this?" works without "look at my screen". Separately, and off by
+default, "watch and comment" looks at each newly opened app unprompted and
+speaks only when the model finds something worth saying.
+
+Why the watcher is off by default: it sends screen text to the model
+provider on its own, and each look spends the provider's quota. It is at
+most one look a minute, never while he is busy or listening, never on the
+launcher, the keyboard or system UI, and password fields are never read.
+
+Screen text is other apps' content, so it always goes to the model as quoted
+data with a line saying it is not an instruction; sensitive tools still ask
+for confirmation.
+
+Not verified on a device: the overlay itself, and whether the microphone
+opens from the overlay while another app is in front (Android limits
+background microphone use; an accessibility service is normally exempt).
