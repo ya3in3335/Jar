@@ -1,6 +1,7 @@
 package com.jarvis.ai.core.agent
 
 import com.jarvis.ai.core.net.ChatMessage
+import com.jarvis.ai.core.net.ModelProvider
 import com.jarvis.ai.core.net.ModelTurn
 import com.jarvis.ai.core.net.OpenRouterClient
 import com.jarvis.ai.core.net.MutableToolCall
@@ -71,6 +72,7 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
      * aborts that call rather than running it anyway.
      */
     suspend fun run(
+        provider: ModelProvider,
         apiKey: String,
         model: String,
         instruction: String,
@@ -110,6 +112,7 @@ class AgentRuntime @Inject constructor(private val client: OpenRouterClient) {
                     val pendingCalls = mutableMapOf<Int, MutableToolCall>()
 
                     client.stream(
+                        provider = provider,
                         apiKey = apiKey,
                         model = model,
                         messages = messages,

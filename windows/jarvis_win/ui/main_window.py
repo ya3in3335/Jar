@@ -193,6 +193,7 @@ class MainWindow(QWidget):
             self.voice_picker.setEnabled(False)
         else:
             self.voice_picker.setEnabled(True)
+            self._voice_engines = {voice.id: voice.provider for voice in voices if voice.provider}
             for voice in voices:
                 self.voice_picker.addItem(voice.display, voice.id)
             index = self.voice_picker.findData(self.settings.voice)
@@ -205,6 +206,10 @@ class MainWindow(QWidget):
         if not voice_id:
             return
         self.settings.voice = voice_id
+        # A voice belongs to one engine; choosing it chooses the engine too.
+        engine = getattr(self, "_voice_engines", {}).get(voice_id)
+        if engine:
+            self.settings.tts_provider = engine
         self.settings.save()
         self.voice_changed.emit(voice_id)
 

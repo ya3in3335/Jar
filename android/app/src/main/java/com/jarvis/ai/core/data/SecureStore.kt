@@ -5,11 +5,12 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.jarvis.ai.core.net.ModelProvider
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Secrets at rest: the OpenRouter key and this device's hub token.
+ * Secrets at rest: the model keys (Groq, OpenRouter) and this device's hub token.
  *
  * Backed by EncryptedSharedPreferences with an AES-256-GCM master key held
  * in the Android Keystore, so the bytes on disk are useless off-device.
@@ -44,6 +45,23 @@ class SecureStore @Inject constructor(context: Context) {
     var openRouterKey: String?
         get() = prefs?.getString(KEY_OPENROUTER, null)
         set(value) = put(KEY_OPENROUTER, value)
+
+    var groqKey: String?
+        get() = prefs?.getString(KEY_GROQ, null)
+        set(value) = put(KEY_GROQ, value)
+
+    /** The model key that belongs to [provider]. */
+    fun modelKey(provider: ModelProvider): String? = when (provider) {
+        ModelProvider.GROQ -> groqKey
+        ModelProvider.OPENROUTER -> openRouterKey
+    }
+
+    fun setModelKey(provider: ModelProvider, value: String?) {
+        when (provider) {
+            ModelProvider.GROQ -> groqKey = value
+            ModelProvider.OPENROUTER -> openRouterKey = value
+        }
+    }
 
     var deviceToken: String?
         get() = prefs?.getString(KEY_DEVICE_TOKEN, null)
@@ -85,6 +103,7 @@ class SecureStore @Inject constructor(context: Context) {
         const val TAG = "SecureStore"
         const val FILE_NAME = "jarvis_secure_prefs"
         const val KEY_OPENROUTER = "openrouter_api_key"
+        const val KEY_GROQ = "groq_api_key"
         const val KEY_DEVICE_TOKEN = "device_token"
         const val KEY_BACKEND_URL = "backend_url"
         const val KEY_DEEPGRAM = "deepgram_api_key"
@@ -97,5 +116,6 @@ class SecureStore @Inject constructor(context: Context) {
 fun redact(text: String): String = text
     .replace(Regex("jv1\\.[a-z2-9]{12}\\.[a-z2-9]{10}\\.[A-Za-z0-9_-]+"), "jv1.***")
     .replace(Regex("sk-or-[A-Za-z0-9_-]{6,}"), "sk-or-***")
+    .replace(Regex("gsk_[A-Za-z0-9]{6,}"), "gsk_***")
     // Deepgram and Azure keys are bare hex, so they are matched by shape.
     .replace(Regex("\\b[0-9a-f]{32,40}\\b"), "***")

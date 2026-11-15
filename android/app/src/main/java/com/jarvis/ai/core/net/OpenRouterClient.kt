@@ -17,7 +17,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * OpenRouter over HTTPS.
+ * Chat completions over HTTPS, for every [ModelProvider].
+ *
+ * The class keeps its first name; it now serves Groq as well, since both
+ * speak the same dialect.
  *
  * The key is held by the caller and sent per request. It is never written to
  * a log: failures are reported through [redact].
@@ -30,15 +33,21 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
 
     /** One non-streaming turn. Used by the agent loop, which needs tool calls whole. */
     suspend fun complete(
+        provider: ModelProvider,
         apiKey: String,
         model: String,
         messages: List<ChatMessage>,
         tools: List<JsonObject> = emptyList(),
         maxTokens: Int = 1024,
+        toolChoice: String = "auto",
+        extra: JsonObject? = null,
     ): ModelTurn = withContext(Dispatchers.IO) {
-        val payload = OpenRouterParser.buildRequest(model, messages, tools, maxTokens, stream = false)
+        requireAllowed(provider, model)
+        val payload = OpenRouterParser.buildRequest(
+            model, messages, tools, maxTokens, stream = false, toolChoice = toolChoice, extra = extra,
+        )
         val request = Request.Builder()
-            .url("$BASE/chat/completions")
+            .url("${provider.baseUrl}/chat/completions")
             .header("Authorization", "Bearer $apiKey")
             .header("X-Title", "JARVIS")
             .post(payload.toString().toRequestBody(mediaType))
@@ -46,7 +55,7 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
 
         http.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw mapHttpError(response.code, body)
+            if (!response.isSuccessful) throw mapHttpError(provider, response.code, body)
             OpenRouterParser.parseTurn(json.parseToJsonElement(body) as JsonObject)
         }
     }
@@ -56,15 +65,17 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
      * Tool-call fragments are accumulated and emitted once complete.
      */
     fun stream(
+        provider: ModelProvider,
         apiKey: String,
         model: String,
         messages: List<ChatMessage>,
         tools: List<JsonObject> = emptyList(),
         maxTokens: Int = 1024,
     ): Flow<StreamEvent> = flow {
+        requireAllowed(provider, model)
         val payload = OpenRouterParser.buildRequest(model, messages, tools, maxTokens, stream = true)
         val request = Request.Builder()
-            .url("$BASE/chat/completions")
+            .url("${provider.baseUrl}/chat/completions")
             .header("Authorization", "Bearer $apiKey")
             .header("X-Title", "JARVIS")
             .header("Accept", "text/event-stream")
@@ -73,7 +84,7 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
 
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw mapHttpError(response.code, response.body?.string().orEmpty())
+                throw mapHttpError(provider, response.code, response.body?.string().orEmpty())
             }
             val source = response.body?.source() ?: throw IOException("empty response body")
             val pending = mutableMapOf<Int, MutableToolCall>()
@@ -100,21 +111,22 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
      * Verify a key and report what the chosen model can do.
      * Returns an Arabic description on success.
      */
-    suspend fun testConnection(apiKey: String, model: String): Result<String> = runCatching {
+    suspend fun testConnection(provider: ModelProvider, apiKey: String, model: String): Result<String> = runCatching {
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$BASE/models")
+                .url("${provider.baseUrl}/models")
                 .header("Authorization", "Bearer $apiKey")
                 .get()
                 .build()
 
             http.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) throw mapHttpError(response.code, body)
+                if (!response.isSuccessful) throw mapHttpError(provider, response.code, body)
 
-                val all = ModelCapabilities.parseModels(json.parseToJsonElement(body) as JsonObject)
+                val all = ModelCapabilities.parseModels(json.parseToJsonElement(body) as JsonObject, provider)
                 val chosen = all.firstOrNull { it.id == model }
                 when {
+                    !provider.allows(model) -> "المفتاح يعمل. لكن '$model' نموذج مدفوع، وهذا التطبيق يستعمل نماذج ${provider.label} المجانية فقط"
                     all.isEmpty() -> "المفتاح يعمل، لكن لم تُرجَع أي نماذج"
                     chosen == null -> "المفتاح يعمل. لكن النموذج '$model' غير موجود في القائمة (${all.size} نموذجًا متاحًا)"
                     !chosen.tools -> "المفتاح يعمل. لكن هذا النموذج لا يدعم استدعاء الأدوات، فستعمل المحادثة دون تنفيذ أوامر"
@@ -125,27 +137,31 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
     }
 
     /** Models that advertise tool support, for the settings picker. */
-    suspend fun toolCapableModels(apiKey: String): List<ModelCapabilities.Caps> = withContext(Dispatchers.IO) {
+    suspend fun toolCapableModels(
+        provider: ModelProvider,
+        apiKey: String,
+    ): List<ModelCapabilities.Caps> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$BASE/models")
+            .url("${provider.baseUrl}/models")
             .header("Authorization", "Bearer $apiKey")
             .get()
             .build()
         http.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw mapHttpError(response.code, body)
-            ModelCapabilities.parseModels(json.parseToJsonElement(body) as JsonObject).filter { it.tools }
+            if (!response.isSuccessful) throw mapHttpError(provider, response.code, body)
+            ModelCapabilities.parseModels(json.parseToJsonElement(body) as JsonObject, provider)
+                .filter { it.tools && provider.allows(it.id) }
         }
     }
 
     /** Turn an HTTP failure into something the UI can show in Arabic. */
-    private fun mapHttpError(code: Int, body: String): Exception {
+    private fun mapHttpError(provider: ModelProvider, code: Int, body: String): Exception {
         val detail = runCatching {
             OpenRouterParser.parseTurn(json.parseToJsonElement(body) as JsonObject)
         }.exceptionOrNull()?.message
 
         return when (code) {
-            401, 403 -> OpenRouterException("مفتاح OpenRouter غير صحيح أو منتهي", "invalid_key")
+            401, 403 -> OpenRouterException("مفتاح ${provider.label} غير صحيح أو منتهي", "invalid_key")
             402 -> OpenRouterException("رصيد الحساب غير كافٍ لهذا النموذج", "insufficient_credits")
             404 -> OpenRouterException("النموذج غير موجود", "model_not_found")
             408, 504 -> OpenRouterException("انتهت المدّة المحدّدة", "timeout")
@@ -158,8 +174,14 @@ class OpenRouterClient @Inject constructor(private val http: OkHttpClient) {
         }
     }
 
-    private companion object {
-        const val BASE = "https://openrouter.ai/api/v1"
+    /** Refuse a paid model before anything is sent, so it can never be billed. */
+    private fun requireAllowed(provider: ModelProvider, model: String) {
+        if (!provider.allows(model)) {
+            throw OpenRouterException(
+                "النموذج '$model' مدفوع. هذا التطبيق يستعمل نماذج ${provider.label} المجانية فقط — اختر نموذجًا مجانيًا من الإعدادات",
+                "paid_model_blocked",
+            )
+        }
     }
 }
 

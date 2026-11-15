@@ -250,3 +250,82 @@ class ModelCapabilitiesTest {
         assertTrue(ModelCapabilities.parseModels(obj("{}")).isEmpty())
     }
 }
+
+class ModelProviderTest {
+
+    @Test
+    fun `openrouter allows only free models`() {
+        assertTrue(ModelProvider.OPENROUTER.allows("openrouter/free"))
+        assertTrue(ModelProvider.OPENROUTER.allows("meta-llama/llama-3.3-70b-instruct:free"))
+        assertFalse(ModelProvider.OPENROUTER.allows("anthropic/claude-3.5-haiku"))
+        assertFalse(ModelProvider.OPENROUTER.allows("openai/gpt-4o-mini:online"))
+        // ":free" has to be the variant, not a substring somewhere else.
+        assertFalse(ModelProvider.OPENROUTER.allows("vendor/model:free:online"))
+    }
+
+    @Test
+    fun `groq allows any of its models`() {
+        assertTrue(ModelProvider.GROQ.allows("llama-3.3-70b-versatile"))
+        assertTrue(ModelProvider.GROQ.allows("openai/gpt-oss-120b"))
+    }
+
+    @Test
+    fun `defaults are allowed by their own provider`() {
+        for (provider in ModelProvider.entries) {
+            assertTrue(provider.allows(provider.defaultModel))
+            assertTrue(provider.suggestedModels.all(provider::allows))
+        }
+    }
+
+    @Test
+    fun `an unknown or missing provider id falls back to groq`() {
+        assertEquals(ModelProvider.GROQ, ModelProvider.fromId(null))
+        assertEquals(ModelProvider.GROQ, ModelProvider.fromId("something-else"))
+        assertEquals(ModelProvider.OPENROUTER, ModelProvider.fromId("openrouter"))
+    }
+}
+
+class GroqModelsTest {
+
+    private val listing = obj(
+        """{"data":[
+           {"id":"llama-3.3-70b-versatile","active":true,"context_window":131072},
+           {"id":"openai/gpt-oss-20b","active":true,"context_window":131072},
+           {"id":"whisper-large-v3-turbo","active":true,"context_window":448},
+           {"id":"meta-llama/llama-prompt-guard-2-86m","active":true,"context_window":512},
+           {"id":"canopylabs/orpheus-arabic-saudi","active":true,"context_window":4000},
+           {"id":"retired-model","active":false,"context_window":8192}]}""",
+    )
+
+    @Test
+    fun `only active chat models are offered`() {
+        val ids = ModelCapabilities.parseModels(listing, ModelProvider.GROQ).map { it.id }
+        assertEquals(listOf("llama-3.3-70b-versatile", "openai/gpt-oss-20b"), ids)
+    }
+
+    @Test
+    fun `groq chat models count as tool capable and carry their context window`() {
+        val caps = ModelCapabilities.parseModels(listing, ModelProvider.GROQ).first()
+        assertTrue(caps.tools)
+        assertEquals(131072, caps.contextLength)
+    }
+}
+
+class RequestOptionsTest {
+
+    @Test
+    fun `tool choice and extra fields reach the request`() {
+        val body = OpenRouterParser.buildRequest(
+            model = "openai/gpt-oss-20b",
+            messages = listOf(ChatMessage.User("x")),
+            tools = listOf(obj("""{"type":"browser_search"}""")),
+            maxTokens = 100,
+            stream = false,
+            toolChoice = "required",
+            extra = obj("""{"reasoning_effort":"low"}"""),
+        )
+        assertEquals("required", body["tool_choice"]?.jsonPrimitive?.content)
+        assertEquals("low", body["reasoning_effort"]?.jsonPrimitive?.content)
+        assertEquals("browser_search", body["tools"]!!.jsonArray[0].jsonObject["type"]?.jsonPrimitive?.content)
+    }
+}

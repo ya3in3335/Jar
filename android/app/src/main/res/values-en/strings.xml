@@ -23,8 +23,8 @@
 
     <string name="settings_title">Settings</string>
     <string name="settings_provider">AI provider</string>
-    <string name="settings_api_key">OpenRouter key</string>
-    <string name="settings_api_key_help">Stored on this device only, encrypted with an Android Keystore key. Sent to no server other than OpenRouter.</string>
+    <string name="settings_api_key">Key for</string>
+    <string name="settings_api_key_help">Stored on this device only, encrypted with an Android Keystore key. Sent only to the provider you chose.</string>
     <string name="settings_model">Model</string>
     <string name="settings_test_connection">Test connection</string>
     <string name="settings_voice">Voice</string>

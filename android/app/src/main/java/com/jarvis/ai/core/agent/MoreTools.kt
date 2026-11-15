@@ -13,8 +13,10 @@ import android.provider.ContactsContract
 import android.provider.Settings
 import androidx.core.net.toUri
 import com.jarvis.ai.core.net.ChatMessage
+import com.jarvis.ai.core.net.ModelProvider
 import com.jarvis.ai.core.net.OpenRouterClient
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
@@ -51,17 +53,20 @@ private fun Context.launch(intent: Intent): Boolean = try {
 // ------------------------------------------------------------- web research
 
 /**
- * Web research, through the OpenRouter key the user already has.
+ * Web research, through the Groq key the user already has.
  *
- * OpenRouter runs a search plugin for any model when ":online" is appended
- * to the model id, so this needs no second account and no second key. The
- * answer comes back already summarised, which is what the agent needs to
- * chain into the next step — a list of blue links would not be.
+ * Groq runs a `browser_search` tool on its own servers for the gpt-oss
+ * models, so this needs no second account. The answer comes back already
+ * summarised, which is what the agent needs to chain into the next step —
+ * a list of blue links would not be.
+ *
+ * It used to go through OpenRouter's ":online" plugin, which bills per
+ * search; that path is gone now that OpenRouter is free-models-only.
  */
 class WebSearchTool(
     private val client: OpenRouterClient,
     private val apiKeyProvider: () -> String?,
-    private val model: String = "openai/gpt-4o-mini",
+    private val model: String = "openai/gpt-oss-20b",
 ) : ToolExecutor {
 
     override val tool = Tool(
@@ -76,7 +81,7 @@ class WebSearchTool(
 
     override suspend fun execute(args: JsonObject): ToolResult {
         val query = args.str("query") ?: return ToolResult.failure("لم تُحدَّد عبارة البحث")
-        val key = apiKeyProvider() ?: return ToolResult.failure("البحث يحتاج مفتاح OpenRouter")
+        val key = apiKeyProvider() ?: return ToolResult.failure("البحث في الويب يحتاج مفتاح Groq — أضفه من الإعدادات")
         val wantsFull = args.str("detail") == "full"
 
         val instruction = buildString {
@@ -87,18 +92,24 @@ class WebSearchTool(
         }
 
         return try {
-            // ":online" is what turns on the search plugin.
             val turn = client.complete(
+                provider = ModelProvider.GROQ,
                 apiKey = key,
-                model = "$model:online",
+                model = model,
                 messages = listOf(ChatMessage.User(instruction)),
-                maxTokens = if (wantsFull) 900 else 400,
+                tools = listOf(JsonObject(mapOf("type" to JsonPrimitive("browser_search")))),
+                toolChoice = "required",
+                // Low effort keeps the browsing session, and so the token use, short.
+                extra = JsonObject(mapOf("reasoning_effort" to JsonPrimitive("low"))),
+                // The reply carries page snippets before the answer, so it needs room.
+                maxTokens = if (wantsFull) 2000 else 1200,
             )
-            val text = turn.text?.trim()
+            // Source markers like 【2†L6-L10】 mean nothing once read aloud.
+            val text = turn.text?.replace(Regex("【[^】]*】"), "")?.trim()
             if (text.isNullOrEmpty()) {
                 ToolResult.failure("لم يرجع البحث نتيجة")
             } else {
-                ToolResult.success(text, detail = "web search via OpenRouter online plugin")
+                ToolResult.success(text, detail = "web search via Groq browser_search")
             }
         } catch (e: Exception) {
             ToolResult.failure("فشل البحث: ${e.message ?: e.javaClass.simpleName}")

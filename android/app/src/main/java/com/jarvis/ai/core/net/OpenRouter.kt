@@ -99,6 +99,9 @@ object OpenRouterParser {
         tools: List<JsonObject>,
         maxTokens: Int,
         stream: Boolean,
+        toolChoice: String = "auto",
+        /** Provider-specific top-level fields, e.g. Groq's `reasoning_effort`. */
+        extra: JsonObject? = null,
     ): JsonObject = buildJsonObject {
         put("model", model)
         put("messages", buildJsonArray { messages.forEach { add(it.toJson()) } })
@@ -106,8 +109,9 @@ object OpenRouterParser {
         put("stream", stream)
         if (tools.isNotEmpty()) {
             put("tools", buildJsonArray { tools.forEach { add(it) } })
-            put("tool_choice", "auto")
+            put("tool_choice", toolChoice)
         }
+        extra?.forEach { (key, value) -> put(key, value) }
     }
 
     /** Parse a completion body. Throws [OpenRouterException] on an error body. */
@@ -210,7 +214,31 @@ object ModelCapabilities {
 
     data class Caps(val id: String, val tools: Boolean, val vision: Boolean, val contextLength: Int)
 
-    fun parseModels(body: JsonObject): List<Caps> =
+    fun parseModels(body: JsonObject, provider: ModelProvider = ModelProvider.OPENROUTER): List<Caps> =
+        if (provider == ModelProvider.GROQ) parseGroqModels(body) else parseOpenRouterModels(body)
+
+    /**
+     * Groq lists speech, guard and audio models next to the chat ones and has
+     * no per-model capability field. Its documentation says every chat model
+     * it hosts supports tool use, so the non-chat ones are dropped by name.
+     */
+    private fun parseGroqModels(body: JsonObject): List<Caps> =
+        body["data"]?.jsonArray.orEmpty().mapNotNull { element ->
+            val model = element.jsonObject
+            val id = model["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            if (model["active"]?.jsonPrimitive?.content == "false") return@mapNotNull null
+            if (GROQ_NOT_CHAT.any { it in id.lowercase() }) return@mapNotNull null
+            Caps(
+                id = id,
+                tools = true,
+                vision = false,
+                contextLength = model["context_window"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+            )
+        }
+
+    private val GROQ_NOT_CHAT = listOf("whisper", "orpheus", "guard", "tts", "playai")
+
+    private fun parseOpenRouterModels(body: JsonObject): List<Caps> =
         body["data"]?.jsonArray.orEmpty().mapNotNull { element ->
             val model = element.jsonObject
             val id = model["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
@@ -226,13 +254,6 @@ object ModelCapabilities {
                 contextLength = model["context_length"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
             )
         }
-
-    /** Free, tool-capable models worth defaulting to on OpenRouter's free tier. */
-    val SUGGESTED_FREE = listOf(
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free",
-        "mistralai/mistral-small-3.1-24b-instruct:free",
-    )
 }
 
 private fun JsonArray?.orEmpty(): List<kotlinx.serialization.json.JsonElement> = this ?: emptyList()

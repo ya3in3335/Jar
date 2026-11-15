@@ -29,6 +29,13 @@ except Exception:  # pragma: no cover - exercised only where keyring is absent
 SERVICE: Final = "JARVIS"
 _TOKEN_KEY: Final = "device_token"
 _OPENROUTER_KEY: Final = "openrouter_api_key"
+_GROQ_KEY: Final = "groq_api_key"
+
+#: The model the first builds defaulted to. It is a paid OpenRouter model
+#: and this app now talks to Groq, so a saved copy of it is replaced.
+_LEGACY_MODEL: Final = "anthropic/claude-3.5-haiku"
+#: Mirrors groq.DEFAULT_MODEL (kept here to avoid an import cycle).
+DEFAULT_MODEL: Final = "llama-3.3-70b-versatile"
 _AZURE_KEY: Final = "azure_speech_key"
 
 
@@ -46,13 +53,15 @@ class Settings:
     """Everything the user can change that is not a secret."""
 
     backend_url: str = ""
-    model: str = "anthropic/claude-3.5-haiku"
+    model: str = DEFAULT_MODEL
     routing_mode: str = "balanced"  # economy | balanced | quality
     voice: str = "ar-DZ-IsmaelNeural"
-    # "sapi5" for the voices installed in Windows, "azure" for the neural ones.
-    tts_provider: str = "sapi5"
-    # "whisper" runs locally, "azure" is faster but needs a key.
-    stt_provider: str = "whisper"
+    # "groq" for Arabic and English on the Groq key, "sapi5" for the voices
+    # installed in Windows, "azure" for the neural ones. An engine that is
+    # not available falls back to the next one that is.
+    tts_provider: str = "groq"
+    # "groq" needs only the Groq key, "whisper" runs locally, "azure" needs its key.
+    stt_provider: str = "groq"
     whisper_model: str = "small"
     azure_region: str = ""
     # Silence that ends an utterance; lower feels snappier, higher is kinder
@@ -92,7 +101,10 @@ class Settings:
         if not isinstance(raw, dict):
             return cls()
         known = {f for f in cls().__dataclass_fields__}
-        return cls(**{k: v for k, v in raw.items() if k in known})
+        loaded = cls(**{k: v for k, v in raw.items() if k in known})
+        if loaded.model == _LEGACY_MODEL:
+            loaded.model = DEFAULT_MODEL
+        return loaded
 
     def save(self) -> Path:
         path = self.path()
@@ -155,6 +167,14 @@ def get_openrouter_key() -> str | None:
     return _get(_OPENROUTER_KEY)
 
 
+def get_groq_key() -> str | None:
+    return _get(_GROQ_KEY)
+
+
+def set_groq_key(key: str | None) -> bool:
+    return _set(_GROQ_KEY, key)
+
+
 def get_azure_key() -> str | None:
     return _get(_AZURE_KEY)
 
@@ -173,5 +193,6 @@ def redact(text: str) -> str:
 
     text = re.sub(r"jv1\.[a-z2-9]{12}\.[a-z2-9]{10}\.[A-Za-z0-9_-]+", "jv1.***", text)
     text = re.sub(r"sk-or-[A-Za-z0-9_-]{6,}", "sk-or-***", text)
+    text = re.sub(r"gsk_[A-Za-z0-9]{6,}", "gsk_***", text)
     text = re.sub(r"cfut_[A-Za-z0-9]{6,}", "cfut_***", text)
     return text

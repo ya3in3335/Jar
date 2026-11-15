@@ -123,6 +123,7 @@ fun HomeScreen(
         JarvisAvatar(
             state = ui.state,
             amplitude = ui.amplitude,
+            spoken = ui.spoken,
             reducedMotion = settings.reducedMotion,
             modifier = Modifier
                 .fillMaxWidth(0.86f)
@@ -159,7 +160,7 @@ fun HomeScreen(
             exit = fadeOut() + shrinkVertically(),
         ) {
             NoticeCard(
-                title = "مفتاح OpenRouter غير مضبوط",
+                title = "مفتاح ${settings.modelProvider.label} غير مضبوط",
                 detail = "الأوامر المباشرة تعمل الآن — الأسئلة تحتاج المفتاح",
                 tone = WarnAmber,
                 onClick = onOpenSettings,

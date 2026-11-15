@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.jarvis.ai.feature.overlay.FloatingAvatar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -29,18 +30,40 @@ import kotlin.coroutines.resume
  */
 class JarvisAccessibilityService : AccessibilityService() {
 
+    private var floating: FloatingAvatar? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         Log.i(TAG, "accessibility service connected")
+        // The head that floats over other apps lives here: this service is
+        // the one part of the app allowed to draw there and that stays alive.
+        floating = runCatching { FloatingAvatar.attach(this) }
+            .onFailure { Log.w(TAG, "floating avatar unavailable: ${it.javaClass.simpleName}") }
+            .getOrNull()
     }
 
+    private fun dropFloating() {
+        runCatching { floating?.destroy() }
+        floating = null
+    }
+
+    /**
+     * The package of the app the user is actually in. Asked of the active
+     * window rather than taken from events, because our own overlay also
+     * raises events and must not be mistaken for the foreground app.
+     */
+    fun activePackage(): String? =
+        runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull() ?: foregroundPackage
+
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        dropFloating()
         instance = null
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        dropFloating()
         instance = null
         super.onDestroy()
     }
@@ -48,7 +71,11 @@ class JarvisAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val packageName = event?.packageName?.toString() ?: return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            foregroundPackage = packageName
+            // Our own overlay must not count as "the app in front".
+            if (packageName != this.packageName || rootInActiveWindow?.packageName?.toString() == this.packageName) {
+                foregroundPackage = packageName
+            }
+            floating?.onWindowChanged(activePackage())
         }
     }
 

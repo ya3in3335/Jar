@@ -14,6 +14,7 @@ from jarvis_win.core.controller import Controller
 from jarvis_win.core.files import DeletionPlan
 from jarvis_win.core.state import AssistantState
 from jarvis_win.ui.main_window import MainWindow
+from jarvis_win.ui.settings_dialog import SettingsDialog
 from jarvis_win.ui.theme import PALETTE
 
 log = logging.getLogger("jarvis")
@@ -95,12 +96,18 @@ def main(argv: list[str] | None = None) -> int:
             "فلن تُحفَظ المفاتيح بين الجلسات."
         )
 
-    recogniser = controller.stt_available()
-    if recogniser is None:
-        window.show_error(
-            "لا يوجد محرّك تعرّف على الكلام. "
-            "ثبّت faster-whisper: pip install -r requirements-stt.txt"
-        )
+    def open_settings() -> None:
+        if SettingsDialog(settings, window).exec():
+            # A new key can make the Groq voices and recogniser available.
+            window.populate_voices(controller.available_voices())
+            window.show_text("حُفظت الإعدادات.")
+
+    window.settings_requested.connect(open_settings)
+
+    if not controller.groq.has_key():
+        window.show_error("أضف مفتاح Groq من «الإعدادات» ليعمل النموذج والتعرّف على الكلام والنطق.")
+    elif controller.stt_available() is None:
+        window.show_error("لا يوجد محرّك تعرّف على الكلام متاح.")
 
     window.populate_voices(controller.available_voices())
 

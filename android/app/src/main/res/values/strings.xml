@@ -27,8 +27,8 @@
     <!-- Settings -->
     <string name="settings_title">الإعدادات</string>
     <string name="settings_provider">مزوّد الذكاء</string>
-    <string name="settings_api_key">مفتاح OpenRouter</string>
-    <string name="settings_api_key_help">يُحفَظ على هذا الجهاز فقط، مشفّرًا بمفتاح من Android Keystore. لا يُرسَل إلى أي خادم غير OpenRouter.</string>
+    <string name="settings_api_key">مفتاح</string>
+    <string name="settings_api_key_help">يُحفَظ على هذا الجهاز فقط، مشفّرًا بمفتاح من Android Keystore. لا يُرسَل إلا إلى المزوّد الذي اخترته.</string>
     <string name="settings_model">النموذج</string>
     <string name="settings_test_connection">اختبار الاتصال</string>
     <string name="settings_voice">الصوت</string>
