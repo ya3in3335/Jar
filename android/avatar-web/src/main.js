@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {ParametricGeometry} from 'three/addons/geometries/ParametricGeometry.js';
 
 const EMBED=/embed/.test(location.hash)||!!window.JARVIS_EMBED;
 if(EMBED){document.documentElement.classList.add('embed');document.body.classList.add('embed');}
@@ -55,17 +56,144 @@ motes.frustumCulled=false; scene.add(motes);
 
 /* ===================== NECK FADE (dithered dissolve, shared uniforms) ===================== */
 const FU={uNeck:{value:0},uLen:{value:.05},uCol:{value:acc},uGray:{value:0}};
-function fadeMat(m){
-  m.onBeforeCompile=sh=>{Object.assign(sh.uniforms,FU);
-    sh.vertexShader='varying float vWY;\n'+sh.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\n vWY=(modelMatrix*vec4(transformed,1.0)).y;');
-    sh.fragmentShader='varying float vWY;uniform float uNeck,uLen,uGray;uniform vec3 uCol;\n'+sh.fragmentShader.replace('#include <dithering_fragment>',
+function fadeMat(m,x={}){
+  m.onBeforeCompile=sh=>{Object.assign(sh.uniforms,FU,x.uniforms||{});
+    sh.vertexShader='varying float vWY;\n'+(x.vHead||'')+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n'+(x.vBegin||''))
+      .replace('#include <project_vertex>','#include <project_vertex>\n vWY=(modelMatrix*vec4(transformed,1.0)).y;');
+    sh.fragmentShader='varying float vWY;uniform float uNeck,uLen,uGray;uniform vec3 uCol;\n'+(x.fHead||'')+sh.fragmentShader
+      .replace('#include <color_fragment>','#include <color_fragment>\n'+(x.fColor||''))
+      .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
        float jf=smoothstep(uNeck-uLen,uNeck,vWY);
        float jn=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453);
        if(jf<=jn*.999+.0005) discard;
        gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(dot(gl_FragColor.rgb,vec3(.3,.59,.11))),uGray);
        gl_FragColor.rgb+=uCol*pow(1.-jf,1.3)*.35;`);};
+  if(x.key)m.customProgramCacheKey=()=>x.key;
   m.needsUpdate=true;}
+
+/* ===================== HAIR, BROWS AND STUBBLE =====================
+   The sculpt is bald. Everything here is placed in the head's own box (vH: x across, y chin to crown,
+   z back to front, each 0..1) so it stays put while the face moves.
+   Hair is grown as shells: the scalp drawn again and again, each copy a little further out and keeping
+   fewer strands, which reads as short cropped hair with a soft outline. */
+const HU={uHM:{value:new THREE.Matrix4()},uBSize:{value:new THREE.Vector3(1,1,1)},uHair:{value:new THREE.Color('#2a1d15')},uDbg:{value:0}};
+const HAIR_GLSL=`
+uniform vec3 uBSize,uHair; uniform float uDbg;
+float h31(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
+float vn3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+  return mix(mix(mix(h31(i),h31(i+vec3(1,0,0)),f.x),mix(h31(i+vec3(0,1,0)),h31(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(h31(i+vec3(0,0,1)),h31(i+vec3(1,0,1)),f.x),mix(h31(i+vec3(0,1,1)),h31(i+vec3(1,1,1)),f.x),f.y),f.z);}
+// how far inside the hairline a point is (negative: bare skin)
+float hairIn(vec3 n){
+  float sx=abs(n.x-.5)*2.;
+  float H=mix(.15,.63,smoothstep(.33,.40,n.z));                 // all of the back; curving up round the ear
+  H=mix(H,.50,smoothstep(.50,.53,n.z));                         // sideburn in front of the ear
+  H=mix(H,.76,smoothstep(.56,.66,n.z));                         // temple
+  H=mix(H,.865+sx*sx*.04,smoothstep(.70,.86,n.z));              // forehead, a touch higher at the corners
+  return n.y-H+(vn3(n*90.)-.5)*.035;}
+`;
+const SKIN_X={key:'skin',uniforms:HU,
+  vHead:'varying vec3 vH;uniform mat4 uHM;\n',vBegin:'vH=(uHM*vec4(position,1.)).xyz;',
+  fHead:'varying vec3 vH;'+HAIR_GLSL,
+  fColor:`{float sx=abs(vH.x-.5)*2.;
+    float hi=hairIn(vH);
+    // scalp under the hair, shading off into the skin so the hairline is not a painted edge
+    diffuseColor.rgb=mix(diffuseColor.rgb,uHair*.55,smoothstep(-.035,.03,hi)*.94);
+    // eyebrows
+    vec2 bp=vec2((sx-BR_X)/BR_W,(vH.y-(BR_Y+BR_ARCH*(1.-pow(abs((sx-BR_X)/BR_W),2.))-sx*BR_TILT))/BR_H);
+    float br=smoothstep(1.,.35,length(bp))*smoothstep(.55,.8,vH.z)*(.55+.45*vn3(vH*vec3(160.,420.,160.)));
+    diffuseColor.rgb=mix(diffuseColor.rgb,uHair*.5,clamp(br*BR_K,0.,.9));
+    // a day's stubble on the jaw, chin and upper lip
+    float jaw=smoothstep(ST_TOP,ST_TOP-.10,vH.y)*smoothstep(.36,.56,vH.z);
+    float lipHole=smoothstep(.0,1.,length(vec2(sx/LP_W,(vH.y-LP_Y)/LP_H)));
+    float cheek=smoothstep(ST_TOP-.02,ST_TOP-.16,vH.y+ (1.-sx)*CH_DIP*smoothstep(.75,1.,vH.z));
+    float st=jaw*cheek*lipHole*(.6+.4*vn3(vH*520.));
+    diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.62,.60,.62)+uHair*.10,st*ST_K);
+    if(uDbg>.5){vec3 g=fract(vH*10.);float l=step(.94,g.y)+step(.94,g.z)*.6+step(.94,g.x)*.3;diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.,0.,0.),min(l,1.));
+      if(fract(vH.y*2.)>.97||fract(vH.z*2.)>.97)diffuseColor.rgb=vec3(0.,1.,0.);}
+  }`};
+const P={BR_X:'.36',BR_W:'.26',BR_Y:'.600',BR_ARCH:'.012',BR_TILT:'.0',BR_H:'.022',BR_K:'1.1',ST_TOP:'.36',LP_W:'.30',LP_Y:'.215',LP_H:'.035',CH_DIP:'.0',ST_K:'.55'};
+for(const k in P)SKIN_X.fColor=SKIN_X.fColor.split(k).join(P[k]);
+const SHELLS=16, HAIR_LEN=.011;          // metres at the crown
+function growHair(face,parent){
+  const g=face.geometry,pos=g.attributes.position,_p=new THREE.Vector3();
+  // keep only the triangles that can carry hair
+  const idx=g.index.array,keep=[];const ny=i=>_p.fromBufferAttribute(pos,i).applyMatrix4(HU.uHM.value).y, nz=i=>_p.fromBufferAttribute(pos,i).applyMatrix4(HU.uHM.value).z;
+  for(let i=0;i<idx.length;i+=3){const a=idx[i],b=idx[i+1],c=idx[i+2];
+    if(Math.max(ny(a),ny(b),ny(c))>.2&&Math.min(nz(a),nz(b),nz(c))<.93)keep.push(a,b,c);}
+  const hg=new THREE.BufferGeometry();hg.setAttribute('position',pos);hg.setAttribute('normal',g.attributes.normal);hg.setIndex(keep);
+  const ws=face.getWorldScale(new THREE.Vector3()).x, grp=new THREE.Group();
+  for(let i=1;i<=SHELLS;i++){const h=i/SHELLS;
+    const m=new THREE.MeshStandardMaterial({color:'#ffffff',roughness:.62,metalness:0});
+    fadeMat(m,{key:'hair',uniforms:{...HU,uH:{value:h},uLenO:{value:HAIR_LEN/ws}},
+      vHead:'varying vec3 vH;varying float vLs;uniform mat4 uHM;uniform float uH,uLenO;\n',
+      vBegin:`vH=(uHM*vec4(position,1.)).xyz;
+        vLs=mix(.28,1.,smoothstep(.60,.84,vH.y))*mix(1.,1.25,smoothstep(.7,.9,vH.z)*smoothstep(.8,.9,vH.y));
+        vec3 nn=normalize(objectNormal);
+        // strands lean forward and a little down as they get longer
+        transformed+=(nn+vec3(0.,-.35,.55)*uH*uH)*uLenO*uH*vLs;`,
+      fHead:'varying vec3 vH;varying float vLs;uniform float uH;'+HAIR_GLSL,
+      fColor:`{float hi=hairIn(vH);if(hi<0.)discard;
+        vec3 q=vH*uBSize*STRAND;float r=h31(floor(q)),r2=h31(floor(q*.37)+7.);
+        float thick=mix(.55,1.,smoothstep(0.,.06,hi));
+        if(r*thick<uH*uH*.96+.02)discard;
+        diffuseColor.rgb=uHair*(.50+1.25*uH)*(.75+.5*r2);}`.replace('STRAND','1700.')});
+    const sh=new THREE.Mesh(hg,m);sh.frustumCulled=false;sh.renderOrder=i;grp.add(sh);}
+  grp.position.copy(face.position);grp.quaternion.copy(face.quaternion);grp.scale.copy(face.scale);parent.add(grp);return grp;}
+
+/* ===================== NECK AND CLOTHES =====================
+   Only the top of them is ever seen: a neck, the collar of a white tee and a zipped track jacket,
+   all thinning into light below the collarbone. They stay still while the head turns. */
+const body=new THREE.Group(); scene.add(body);
+function canvasTex(w,h,draw,rep){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=4;if(rep){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(rep[0],rep[1]);}return t;}
+function weave(x,w,h,base,amt){x.fillStyle=base;x.fillRect(0,0,w,h);const d=x.getImageData(0,0,w,h),p=d.data;
+  for(let i=0;i<p.length;i+=4){const X=(i/4)%w,Y=(i/4/w)|0,n=(Math.random()-.5)*amt+((X+Y)%3===0?amt*.35:0)-((X-Y)%4===0?amt*.25:0);p[i]+=n;p[i+1]+=n;p[i+2]+=n;}x.putImageData(d,0,0);}
+function ringSurf(f,su,sv,mat){const g=new ParametricGeometry((u,v,t)=>f(u,v,t),su,sv);g.computeVertexNormals();const m=new THREE.Mesh(g,mat);m.frustumCulled=false;body.add(m);return m;}
+const sstep=(a,b,x)=>{x=clamp((x-a)/(b-a),0,1);return x*x*(3-2*x);}, mix=(a,b,t)=>a+(b-a)*t;
+function buildBody(){
+  const NZ=y=>-.03+y*.13;                                    // the neck leans forward as it rises
+  // neck, darker where the jaw shades it
+  const skinTex=canvasTex(8,128,(x,w,h)=>{const g=x.createLinearGradient(0,0,0,h);g.addColorStop(0,'#4a3226');g.addColorStop(.30,'#7d5946');g.addColorStop(.5,'#ab8066');g.addColorStop(1,'#b78a6e');x.fillStyle=g;x.fillRect(0,0,w,h);});
+  const skin=new THREE.MeshStandardMaterial({map:skinTex,roughness:.62,metalness:0});fadeMat(skin);
+  ringSurf((u,v,t)=>{const a=u*Math.PI*2,y=mix(.10,-.20,v),w=sstep(-.05,-.19,y);
+    const rx=.057+.06*w+.004*Math.cos(a*2),rz=.061+.012*w;
+    // the throat stands a little proud in front
+    const adam=Math.exp(-Math.pow((y+.02)/.016,2))*Math.max(0,Math.cos(a))**6*.004;
+    t.set(Math.sin(a)*rx,y,NZ(y)+Math.cos(a)*(rz+adam));},48,24,skin);
+  // white tee: a ribbed crew neck, lower in front
+  const teeTex=canvasTex(256,256,(x,w,h)=>{weave(x,w,h,'#e4e4e0',10);x.fillStyle='rgba(0,0,0,.10)';for(let i=0;i<w;i+=4)x.fillRect(i,0,1,30);x.fillStyle='rgba(0,0,0,.25)';x.fillRect(0,30,w,2);},[6,1]);
+  const tee=new THREE.MeshStandardMaterial({map:teeTex,roughness:.9,metalness:0,side:THREE.DoubleSide});fadeMat(tee);
+  ringSurf((u,v,t)=>{const a=u*Math.PI*2,front=Math.cos(a)*.5+.5;
+    const top=mix(-.014,-.056,front), y=mix(top,-.25,v*v), w=sstep(top-.01,-.22,y);
+    const rx=.0625+.09*w,rz=.0665+.035*w;
+    t.set(Math.sin(a)*rx,y,NZ(y)+Math.cos(a)*rz);},64,20,tee);
+  // track jacket: stand collar, zip pulled part of the way down
+  const VC=.36;                                                 // where the collar meets the body, in v and in the texture
+  const jkTex=canvasTex(1024,512,(x,w,h)=>{
+    weave(x,w,h,'#4f9bd6',9);
+    const seam=h*VC;
+    x.fillStyle='rgba(0,20,60,.10)';for(let i=0;i<w;i+=6)x.fillRect(i,0,2,seam);            // ribbed collar
+    x.fillStyle='rgba(5,20,50,.45)';x.fillRect(0,seam-2,w,3);x.fillStyle='rgba(255,255,255,.22)';x.fillRect(0,seam+2,w,1);
+    x.fillStyle='#f4f6f8';x.fillRect(0,10,w,7);x.fillRect(0,24,w,4);                        // two white tipping lines
+    x.strokeStyle='#12203a';x.lineWidth=4;for(const sx of [.27,.73]){x.beginPath();x.moveTo(w*sx,seam+3);x.lineTo(w*sx,h);x.stroke();}   // shoulder piping
+    for(const e of [0,1]){const X=e?w-20:0;x.fillStyle='#eef1f4';x.fillRect(X,0,20,h);       // zip tape, then metal teeth
+      x.fillStyle='rgba(0,0,0,.2)';x.fillRect(e?X:X+19,0,1,h);
+      const tx=e?w-7:0;for(let y=0;y<h;y+=6){x.fillStyle='#d3d8df';x.fillRect(tx,y,7,4);x.fillStyle='#7d8590';x.fillRect(tx,y+4,7,2);}}
+  });
+  const jk=new THREE.MeshStandardMaterial({map:jkTex,roughness:.55,metalness:0,side:THREE.DoubleSide});fadeMat(jk);
+  ringSurf((u,v,t)=>{
+    const open=mix(.36,.03,sstep(.0,.72,v));                   // the V of the open zip, in radians each side
+    const a=mix(open,Math.PI*2-open,u), front=Math.cos(a)*.5+.5, edge=Math.pow(Math.abs(u-.5)*2,10);
+    const top=mix(.024,-.030,front), base=mix(-.035,-.072,front);
+    const cv=clamp(v/VC,0,1), bv=clamp((v-VC)/(1-VC),0,1);
+    const y=v<VC?mix(top,base,cv):mix(base,-.27,bv), w=sstep(0,1,bv*.9);
+    const flare=(1-cv)*(1-cv)*(.004+.014*edge);                // the collar leans away from the neck, more at its points
+    const rx=.074+.175*w+flare,rz=.078+.07*w+flare;
+    t.set(Math.sin(a)*rx,y,NZ(Math.max(y,-.06))+Math.cos(a)*rz);},96,32,jk);
+}
+buildBody();
 
 /* ===================== MODEL: A SCULPTED HEAD WITH 52 FACIAL BLENDSHAPES =====================
    No skeleton. The head turns as one piece around the top of the neck, the eyeballs are their own
@@ -79,7 +207,7 @@ const loadModel=()=>new Promise((res,rej)=>{
   if(wrapped)import(wrapped).then(m=>loader.parse(b64buf(m.default),'',res,rej),rej);
   else loader.load('face.glb',res,undefined,rej);});
 
-const HEAD_H=.25;                       // metres, crown to chin
+const HEAD_H=.23, HEAD_Z=.022;          // metres: crown to chin, and how far the head sits ahead of the neck
 const pivot=new THREE.Group(); scene.add(pivot);   // turns the whole head
 let face=null, dict=null, inf=null, eyeL=null, eyeR=null, ready=false;
 const eyeRest={l:new THREE.Euler(),r:new THREE.Euler()};
@@ -172,7 +300,7 @@ cv.addEventListener('pointerup',e=>{if(down&&performance.now()-down.t<320&&Math.
 const S={pitch:0,yaw:0,roll:0,ex:0,ey:0,open:0,wide:0,press:0,smile:0,lv:0,gray:0,hudS:1,camZ:1,brow:0,frown:0,wideEye:0,squint:0};
 let last=performance.now(),first=true,blinkAt=2,blinkT=-1,blinkTwice=false;
 const cen=new THREE.Vector3(),_v=new THREE.Vector3();
-function camDist(){const a=innerWidth/innerHeight;return Math.max(.74,.6/a)*(EMBED?.84:1);}
+function camDist(){const a=innerWidth/innerHeight;return Math.max(1.14,.86/a)*(EMBED?.84:1);}
 function tick(now){
   requestAnimationFrame(tick);
   const dt=Math.min((now-last)/1000,.05);last=now;T+=dt;
@@ -288,11 +416,11 @@ function tick(now){
   hudMat.opacity=(.3+S.lv*.5+pulse*.12)*(1-S.gray*.6);glow.material.opacity=(.3+S.lv*.4)*(1-S.gray*.7);
   // motes drifting off where the neck dissolves
   for(let i=0;i<PN;i++){const s=pSeed[i],ph=(T*(.12+s*.16)+s*7.3)%1,a=s*61.7+T*.2*(s-.5),r=.015+((s*13.37)%1)*.075;
-    pPos[i*3]=Math.cos(a)*r;pPos[i*3+1]=.035-ph*.2;pPos[i*3+2]=Math.sin(a)*r*.8-.01;}
+    pPos[i*3]=Math.cos(a)*r*2.6;pPos[i*3+1]=-.12-ph*.14;pPos[i*3+2]=Math.sin(a)*r*1.3-.01;}
   pGeo.attributes.position.needsUpdate=true;motes.material.opacity=.7*(1-S.gray*.6);
   // camera keeps the head framed (a little closer while speaking / listening)
   S.camZ=damp(S.camZ,state==='speaking'||state==='listening'?.94:1,3,dt);
-  const tgt=_v.set(0,HEAD_H*.5,0);
+  const tgt=_v.set(0,HEAD_H*.33,0);
   if(first){controls.target.copy(tgt);camera.position.set(0,tgt.y+.01,camDist());first=false;}
   else{const d=camera.position.clone().sub(controls.target).setLength(camDist()*S.camZ);controls.target.lerp(tgt,1-Math.exp(-6*dt));camera.position.copy(controls.target).add(d);}
   controls.update();renderer.render(scene,camera);
@@ -313,19 +441,25 @@ Object.keys(ST).forEach(k=>{const b=document.createElement('button');b.dataset.s
       if(!o.isMesh)return; o.frustumCulled=false;
       if(o.morphTargetDictionary&&o.morphTargetDictionary.jawOpen!=null){face=o;
         // the sculpt's texture is near-monochrome: tinting it gives the skin its colour, eyes and teeth keep theirs
-        o.material=o.material.clone();o.material.color.set('#dcab8e');o.material.roughness=.58;o.material.metalness=0;}
+        o.material=o.material.clone();o.material.color.set('#e8b99c');o.material.roughness=.58;o.material.metalness=0;}
       else{o.material=o.material.clone();o.material.roughness=.25;}
-      fadeMat(o.material);
+      fadeMat(o.material,o===face?SKIN_X:undefined);
     });
     if(!face)throw new Error('no face mesh');
     dict=face.morphTargetDictionary;inf=face.morphTargetInfluences;
     if(eyeL){eyeRest.l.copy(eyeL.rotation);eyeRest.r.copy(eyeR.rotation);}
-    // stand the head on the origin, crown to chin HEAD_H tall, turning around the top of the neck
-    const box=new THREE.Box3().setFromObject(model),size=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3());
-    const k=HEAD_H/size.y;model.scale.multiplyScalar(k);
-    model.position.set(-c.x*k,-box.min.y*k,-c.z*k+HEAD_H*.06);
-    pivot.add(model);
-    FU.uNeck.value=HEAD_H*.075;FU.uLen.value=HEAD_H*.075;       // the jaw is whole; below it he thins into light
+    // Stand the head on the origin: chin at 0, crown HEAD_H up, turning around the top of the neck.
+    // The file's own bounds include every blendshape's reach, so the box is measured from the resting face.
+    pivot.add(model);pivot.updateMatrixWorld(true);
+    const box=new THREE.Box3(),rp=face.geometry.attributes.position,_p=new THREE.Vector3();
+    for(let i=0;i<rp.count;i++)box.expandByPoint(_p.fromBufferAttribute(rp,i).applyMatrix4(face.matrixWorld));
+    const size=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3()),k=HEAD_H/size.y;
+    model.scale.multiplyScalar(k);model.position.set(-c.x*k,-box.min.y*k,-c.z*k+HEAD_Z);
+    pivot.updateMatrixWorld(true);
+    size.multiplyScalar(k);HU.uBSize.value.copy(size);
+    HU.uHM.value.makeScale(1/size.x,1/size.y,1/size.z).multiply(new THREE.Matrix4().makeTranslation(size.x/2,0,size.z/2-HEAD_Z)).multiply(face.matrixWorld);
+    growHair(face,face.parent);
+    FU.uNeck.value=-.085;FU.uLen.value=.09;       // the jaw is whole; below it he thins into light
     ready=true;
     if(window.JARVIS_INIT)setState(window.JARVIS_INIT);
     $('load').classList.add('off');
