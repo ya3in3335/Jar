@@ -54,7 +54,7 @@ const motes=new THREE.Points(pGeo,new THREE.PointsMaterial({color:acc,size:.0075
 motes.frustumCulled=false; scene.add(motes);
 
 /* ===================== NECK FADE (dithered dissolve, shared uniforms) ===================== */
-const FU={uNeck:{value:1.45},uLen:{value:.125},uCol:{value:acc},uGray:{value:0}};
+const FU={uNeck:{value:0},uLen:{value:.05},uCol:{value:acc},uGray:{value:0}};
 function fadeMat(m){
   m.onBeforeCompile=sh=>{Object.assign(sh.uniforms,FU);
     sh.vertexShader='varying float vWY;\n'+sh.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\n vWY=(modelMatrix*vec4(transformed,1.0)).y;');
@@ -64,101 +64,80 @@ function fadeMat(m){
        float jn=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453);
        if(jf<=jn*.999+.0005) discard;
        gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(dot(gl_FragColor.rgb,vec3(.3,.59,.11))),uGray);
-       gl_FragColor.rgb+=uCol*pow(1.-jf,1.3)*.6;`);};
+       gl_FragColor.rgb+=uCol*pow(1.-jf,1.3)*.35;`);};
   m.needsUpdate=true;}
 
-/* ===================== MODEL + RETARGETED CLIPS ===================== */
+/* ===================== MODEL: A SCULPTED HEAD WITH 52 FACIAL BLENDSHAPES =====================
+   No skeleton. The head turns as one piece around the top of the neck, the eyeballs are their own
+   nodes, and everything the face does — jaw, lips, lids, brows, cheeks — is a blendshape. */
 try{self.createImageBitmap=undefined;}catch(e){}
 const loader=new GLTFLoader();
-const bkey=n=>n.replace(/^mixamorig:?/,''), isB=o=>o.isBone||/^mixamorig/.test(o.name);
-const loadGLB=f=>new Promise((res,rej)=>loader.load(f,g=>{prep(g);res(g);},undefined,rej));
-const _v=new THREE.Vector3();
-function prep(g){
-  const root=g.scene,bones={};
-  root.traverse(o=>{if(isB(o))bones[bkey(o.name)]=o;if(o.isMesh){o.frustumCulled=false;}});
-  root.updateMatrixWorld(true);
-  const top=(bones.HeadTop_End||bones.Head).getWorldPosition(_v).y;let bot=1e9;
-  ['LeftToeBase','RightToeBase','LeftFoot','RightFoot'].forEach(k=>{if(bones[k])bot=Math.min(bot,bones[k].getWorldPosition(_v).y);});
-  const s=1.72/Math.max(top-bot,1e-6),wrap=new THREE.Group();root.scale.multiplyScalar(s);root.position.y-=bot*s;wrap.add(root);
-  if(bones.LeftUpLeg.getWorldPosition(_v).x<bones.RightUpLeg.getWorldPosition(new THREE.Vector3()).x)root.rotation.y+=Math.PI;
-  const rest={};for(const k in bones)rest[k]={q:bones[k].quaternion.clone(),p:bones[k].position.clone()};
-  wrap.updateMatrixWorld(true);
-  const order=[],refW={},statQ={},refDir={};
-  root.traverse(o=>{if(!isB(o))return;const k=bkey(o.name);if(bones[k]!==o)return;order.push(k);
-    refW[k]=o.getWorldQuaternion(new THREE.Quaternion());
-    if(!isB(o.parent)||bones[bkey(o.parent.name)]!==o.parent)statQ[k]=o.parent.getWorldQuaternion(new THREE.Quaternion());});
-  for(const k of order){const kids=bones[k].children.filter(isB);
-    const c=kids.length===1?kids[0]:(/Hand$/.test(k)?kids.find(x=>/Middle1$/.test(x.name)):null);
-    if(c){const d=c.getWorldPosition(new THREE.Vector3()).sub(bones[k].getWorldPosition(new THREE.Vector3()));if(d.length()>1e-5)refDir[k]=d.normalize();}}
-  g.userData={wrap,bones,rest,order,refW,statQ,refDir,hipsRefW:bones.Hips.getWorldPosition(new THREE.Vector3()),
-    hpInv:bones.Hips.parent.matrixWorld.clone().invert(),mixer:new THREE.AnimationMixer(root)};
-}
-function bake(g,clip){
-  const U=g.userData,B=U.bones,act=U.mixer.clipAction(clip);act.play();
-  const n=Math.max(2,Math.ceil(clip.duration*30)+1),times=new Float32Array(n),D={},P=new Float32Array(n*3),q=new THREE.Quaternion(),qi=new THREE.Quaternion(),v=new THREE.Vector3();
-  for(const k in B)D[k]=new Float32Array(n*4);
-  for(let i=0;i<n;i++){times[i]=i*clip.duration/(n-1);U.mixer.setTime(Math.min(times[i],clip.duration-1e-4));U.wrap.updateMatrixWorld(true);
-    for(const k in B)B[k].getWorldQuaternion(q).multiply(qi.copy(U.refW[k]).invert()).toArray(D[k],i*4);
-    B.Hips.getWorldPosition(v).sub(U.hipsRefW).toArray(P,i*3);}
-  act.stop();U.mixer.uncacheClip(clip);
-  return{times,D,P,duration:clip.duration,dir:U.refDir};
-}
-function makeClip(name,L,g){
-  const U=g.userData,B=U.bones,n=L.times.length,out={},W={},C={},pos=new Float32Array(n*3),qi=new THREE.Quaternion(),ql=new THREE.Quaternion(),v=new THREE.Vector3();
-  for(const k of U.order){W[k]=new THREE.Quaternion();if(L.D[k])out[k]=new Float32Array(n*4);C[k]=U.refW[k].clone();
-    if(L.dir[k]&&U.refDir[k])C[k].premultiply(ql.setFromUnitVectors(U.refDir[k],L.dir[k]));}
-  for(let i=0;i<n;i++){
-    for(const k of U.order){const pW=U.statQ[k]||W[bkey(B[k].parent.name)];
-      if(L.D[k])W[k].fromArray(L.D[k],i*4).multiply(C[k]);else W[k].copy(pW).multiply(U.rest[k].q);
-      if(out[k])ql.copy(qi.copy(pW).invert()).multiply(W[k]).normalize().toArray(out[k],i*4);}
-    v.fromArray(L.P,i*3).add(U.hipsRefW).applyMatrix4(U.hpInv).toArray(pos,i*3);}
-  const tracks=[new THREE.VectorKeyframeTrack(B.Hips.name+'.position',L.times,pos)];
-  for(const k in out)tracks.push(new THREE.QuaternionKeyframeTrack(B[k].name+'.quaternion',L.times,out[k]));
-  return new THREE.AnimationClip(name,L.duration,tracks);
-}
+function b64buf(b){const s=atob(b),n=s.length,a=new Uint8Array(n);for(let i=0;i<n;i++)a[i]=s.charCodeAt(i);return a.buffer;}
+const loadModel=()=>new Promise((res,rej)=>{
+  // the app ships the .glb itself; the hosted preview can only serve it wrapped in a script
+  const wrapped=window.JARVIS_MODULE;
+  if(wrapped)import(wrapped).then(m=>loader.parse(b64buf(m.default),'',res,rej),rej);
+  else loader.load('face.glb',res,undefined,rej);});
 
-let G=null,B=null,mixer=null,ACT={},cur=null,faces=[];
-function fadeTo(name,once){
-  const a=ACT[name];if(!a||a===cur)return;
-  a.reset();a.setLoop(once?THREE.LoopOnce:THREE.LoopRepeat,once?1:Infinity);a.clampWhenFinished=!!once;a.play();
-  if(cur)cur.crossFadeTo(a,.35,false);cur=a;
-}
+const HEAD_H=.25;                       // metres, crown to chin
+const pivot=new THREE.Group(); scene.add(pivot);   // turns the whole head
+let face=null, dict=null, inf=null, eyeL=null, eyeR=null, ready=false;
+const eyeRest={l:new THREE.Euler(),r:new THREE.Euler()};
+const W={};                             // blendshape weights for this frame
+const put=(n,v)=>{if(v>(W[n]||0))W[n]=v;};
+const both=(n,v)=>{put(n+'_L',v);put(n+'_R',v);};
 
 /* ===================== PUBLIC API ===================== */
-let nodUntil=0, smileUntil=0, T=0;
+let smileUntil=0, T=0;
+function setState(s){
+  s=String(s||'').toLowerCase(); if(!ST[s]||s===state&&s!=='success'&&s!=='error')return;
+  state=s; accT.set(ST[s].c);
+  document.documentElement.style.setProperty('--acc',ST[s].c); $('stt').textContent=ST[s].ar;
+  [...$('dock').children].forEach(b=>b.classList.toggle('on',b.dataset.s===s));
+  if(s==='success'){gestures.push({type:'yes',at:T,dur:.9});smileUntil=T+2.2;}
+  if(s==='error')gestures.push({type:'no',at:T,dur:1.1});
+  if(!EMBED){const say=$('say');
+    const txt={speaking:'مرحبًا، أنا جارفيس. كيف أستطيع مساعدتك؟',listening:'أنا أسمعك…',thinking:'لحظة، أفكّر في ذلك…',executing:'جاري تنفيذ الأمر…',
+      success:'تمّ بنجاح.',error:'عذرًا، حدث خطأ.',disconnected:'انقطع الاتصال.',understanding:'أحلّل ما قلته…'}[s];
+    if(txt){say.textContent=txt;say.classList.remove('off');}else say.classList.add('off');
+    if(s==='speaking')speakText(txt);
+    if(s==='success'||s==='error')setTimeout(()=>{if(state===s)setState('idle');},2400);}
+}
+function setLevel(v){level=clamp(+v||0,0,1);levelAt=performance.now();}
 
-/* ===================== SPEECH: MOUTH SHAPED BY THE TEXT, GESTURES BY ITS MEANING =====================
-   The model has one jaw shape (mouthOpen) and one smile, no visemes. So each letter becomes a small
-   open/wide target, the real audio level gates it, and the result reads as lips following the words. */
-let talk=null;                 // {open,wide,cues,dur,t0,armed}
+/* ===================== SPEECH: LIPS SHAPED BY THE TEXT, FACE BY ITS MEANING =====================
+   Each letter becomes a mouth target — how open, how wide or rounded, lips pressed or not — and the
+   real loudness of the playing audio gates it. Timing is estimated from the text, not phoneme-aligned. */
+let talk=null;                 // {open,wide,press,cues,dur,t0,armed}
 const gestures=[];             // {type,at,dur}
-let nextFidget=6;
-const HARAKAT={'َ':[.95,0],'ُ':[.5,-.25],'ِ':[.4,.8],'ْ':[.05,0]};
-function shapeOf(ch){
-  if(/[اآأإىaà-å]/i.test(ch))return[1,.1];
-  if(/[وؤoò-öuù-üw]/i.test(ch))return[.5,-.3];
-  if(/[يئeè-ëiì-ïy]/i.test(ch))return[.42,.8];
-  if(/[مبپpbm]/i.test(ch))return[0,0];
-  if(/[فvf]/i.test(ch))return[.1,.25];
-  if(/[عحهخغقhg]/i.test(ch))return[.6,0];
-  if(/[سشزصثذظتدطنلرszتtdnlr]/i.test(ch))return[.24,.35];
-  if(/[0-9٠-٩]/.test(ch))return[.6,.2];
-  return[.3,.15];
+let nextFidget=5;
+const HARAKAT={'َ':[.95,0],'ُ':[.5,-.8],'ِ':[.4,.8],'ْ':[.05,0]};
+function shapeOf(ch){          // [open, wide(+)/round(-), pressed lips]
+  if(/[اآأإىaà-å]/i.test(ch))return[1,.1,0];
+  if(/[وؤoò-öuù-üw]/i.test(ch))return[.5,-.9,0];
+  if(/[يئeè-ëiì-ïy]/i.test(ch))return[.4,.85,0];
+  if(/[مبپpbm]/i.test(ch))return[0,0,1];
+  if(/[فvf]/i.test(ch))return[.1,.2,.45];
+  if(/[عحهخغقhg]/i.test(ch))return[.62,0,0];
+  if(/[سشزصثذظszcjچج]/i.test(ch))return[.16,.55,0];
+  if(/[تدطنلرضtdnlr]/i.test(ch))return[.3,.25,0];
+  if(/[0-9٠-٩]/.test(ch))return[.6,.2,0];
+  return[.3,.15,0];
 }
 function buildTalk(text){
-  const open=[],wide=[];
-  const push=(o,w,n)=>{for(let i=0;i<n;i++){open.push(o);wide.push(w);}};
+  const open=[],wide=[],press=[];
+  const push=(o,w,p,n)=>{for(let i=0;i<n;i++){open.push(o);wide.push(w);press.push(p);}};
   for(const ch of text){
     const h=HARAKAT[ch];
     if(h){if(open.length){open[open.length-1]=h[0];wide[wide.length-1]=h[1];}continue;}
-    if(/\s/.test(ch)){push(.06,0,1);continue;}
-    if(/[.!?؟…\n]/.test(ch)){push(0,0,5);continue;}
-    if(/[,،;؛:—-]/.test(ch)){push(0,0,3);continue;}
+    if(/\s/.test(ch)){push(.05,0,0,1);continue;}
+    if(/[.!?؟…\n]/.test(ch)){push(0,0,.25,5);continue;}
+    if(/[,،;؛:—-]/.test(ch)){push(0,0,.15,3);continue;}
     if(!/[\p{L}\p{N}]/u.test(ch))continue;
-    const [o,w]=shapeOf(ch);
-    push(o*.55,w,1);push(o,w,1);          // the consonant closes a little, then its vowel opens
+    const [o,w,p]=shapeOf(ch);
+    push(o*.5,w,p,1);push(o,w,p*.5,1);    // the consonant closes a little, then its vowel opens
   }
-  return{open,wide,cues:[],dur:Math.max(.5,open.length*.036),t0:-1,armed:performance.now()};
+  return{open,wide,press,cues:[],dur:Math.max(.5,open.length*.036),t0:-1,armed:performance.now()};
 }
 const CUES=[
   ['laugh',/(ههه+|haha+|\blol\b)/i],
@@ -169,30 +148,15 @@ const CUES=[
   ['think',/(ربما|أظن|أعتقد|لحظة|دعني|قد يكون|maybe|perhaps|i think|let me|hmm)/i],
   ['yes',/(^|[\s"«])(نعم|أجل|تمّ|تم|حاضر|بالتأكيد|طبعًا|طبعا|تمام|أكيد|yes|sure|done|okay|ok|certainly|of course)(?=$|[\s.,!،؛"»])/i],
   ['ask',/[?؟]/]];
-const GDUR={yes:.9,no:1.1,ask:1.3,greet:1.1,joy:1.2,think:1.6,laugh:1.2,warn:1.1,beat:.45};
+const GDUR={yes:.9,no:1.1,ask:1.4,greet:1.2,joy:1.4,think:1.7,laugh:1.3,warn:1.2,beat:.5,glance:1.6};
 function cueFor(clause){for(const [t,re] of CUES)if(re.test(clause))return t;return /!/.test(clause)?'joy':'beat';}
-/** Tell the head what is being said: the mouth follows the letters, the head reacts to the meaning. */
+/** Tell the head what is being said: the lips follow the letters, the face reacts to the meaning. */
 function speakText(text){
   text=String(text||'').trim();if(!text)return;
   talk=buildTalk(text);
   const parts=text.split(/(?<=[.!?؟…\n,،;؛:])/);let pos=0;const total=Math.max(1,text.length);
   talk.cues=parts.filter(p=>p.trim()).map(p=>{const c={type:cueFor(p),at:pos/total};pos+=p.length;return c;});
 }
-function setState(s){
-  s=String(s||'').toLowerCase(); if(!ST[s]||s===state&&s!=='success'&&s!=='error')return;
-  state=s; accT.set(ST[s].c);
-  document.documentElement.style.setProperty('--acc',ST[s].c); $('stt').textContent=ST[s].ar;
-  [...$('dock').children].forEach(b=>b.classList.toggle('on',b.dataset.s===s));
-  if(s==='success'){fadeTo('agree',true);smileUntil=T+2.2;}
-  else if(s==='error')fadeTo('headShake',true);
-  else fadeTo('idle');
-  if(!EMBED){const say=$('say');
-    const txt={speaking:'مرحبًا، أنا جارفيس. كيف أستطيع مساعدتك؟',listening:'أنا أسمعك…',thinking:'لحظة، أفكّر في ذلك…',executing:'جاري تنفيذ الأمر…',
-      success:'تمّ بنجاح.',error:'عذرًا، حدث خطأ.',disconnected:'انقطع الاتصال.',understanding:'أحلّل ما قلته…'}[s];
-    if(txt){say.textContent=txt;say.classList.remove('off');}else say.classList.add('off');
-    if(s==='speaking')speakText(txt);}
-}
-function setLevel(v){level=clamp(+v||0,0,1);levelAt=performance.now();}
 window.Jarvis={setState,setLevel,say:speakText,states:Object.keys(ST),get state(){return state;}};
 addEventListener('message',e=>{const d=e.data;if(!d||d.type!=='jarvis')return;if(d.state)setState(d.state);if(d.level!=null)setLevel(d.level);if(d.say)speakText(d.say);});
 
@@ -202,104 +166,134 @@ const cv=renderer.domElement;
 addEventListener('pointermove',e=>{px=(e.clientX/innerWidth)*2-1;py=(e.clientY/innerHeight)*2-1;pAt=performance.now();});
 cv.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,t:performance.now()};px=(e.clientX/innerWidth)*2-1;py=(e.clientY/innerHeight)*2-1;pAt=down.t;});
 cv.addEventListener('pointerup',e=>{if(down&&performance.now()-down.t<320&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<10){ // tap = greet
-  smileUntil=T+1.8;nodUntil=T+.9;try{window.JarvisHost&&window.JarvisHost.onTap&&window.JarvisHost.onTap();}catch(_){} }down=null;});
+  smileUntil=T+1.8;gestures.push({type:'greet',at:T,dur:1.1});try{window.JarvisHost&&window.JarvisHost.onTap&&window.JarvisHost.onTap();}catch(_){} }down=null;});
 
 /* ===================== LOOP ===================== */
-const _e=new THREE.Euler(),_q=new THREE.Quaternion(),hp=new THREE.Vector3(),np=new THREE.Vector3();
-const add=(k,x,y,z)=>{const b=B[k];if(!b)return;_e.set(x,y,z);_q.setFromEuler(_e);b.quaternion.multiply(_q);};
-const S={pitch:0,yaw:0,roll:0,ex:0,ey:0,mouth:0,wide:0,smile:0,lv:0,gray:0,hudS:1,camZ:1};
-let last=performance.now(),first=true;
-function camDist(){const a=innerWidth/innerHeight;return Math.max(1.22,1.06/a)*(EMBED?.9:1);}
+const S={pitch:0,yaw:0,roll:0,ex:0,ey:0,open:0,wide:0,press:0,smile:0,lv:0,gray:0,hudS:1,camZ:1,brow:0,frown:0,wideEye:0,squint:0};
+let last=performance.now(),first=true,blinkAt=2,blinkT=-1,blinkTwice=false;
+const cen=new THREE.Vector3(),_v=new THREE.Vector3();
+function camDist(){const a=innerWidth/innerHeight;return Math.max(.74,.6/a)*(EMBED?.84:1);}
 function tick(now){
   requestAnimationFrame(tick);
   const dt=Math.min((now-last)/1000,.05);last=now;T+=dt;
-  if(!G){renderer.render(scene,camera);return;}
-  // audio level: real one from the host if fresh, otherwise a synthetic envelope so the demo is alive
+  if(!ready){renderer.render(scene,camera);return;}
+  // audio level: the real one from the host when fresh, otherwise a synthetic envelope so the demo is alive
   const ext=now-levelAt<350;
   let lv=ext?level:0;
   if(!ext&&state==='speaking')lv=clamp(.35+.45*Math.sin(T*9.3)*Math.sin(T*3.1+1)+.25*Math.sin(T*17.7),0,1);
   if(!ext&&state==='listening')lv=.25+.2*Math.sin(T*5.2)*Math.sin(T*1.7);
   S.lv=damp(S.lv,lv,18,dt);
-  // look target: follow the finger/mouse for a while, then wander
-  const fresh=now-pAt<3500; let ty=0,tp=0,tr=0,tex=0,tey=0;
-  if(fresh){ty=px*.5;tp=py*.3;tex=px*.3;tey=py*.2;}else{ty=Math.sin(T*.31)*.14+Math.sin(T*.13)*.08;tp=Math.sin(T*.23)*.05;tex=Math.sin(T*.7)*.12;}
-  if(state==='listening'){tr+=.11;tp+=.07;}
-  if(state==='understanding'){tr-=.06;tp+=.03;}
-  if(state==='thinking'){ty=.26+Math.sin(T*.8)*.07;tp=-.17;tex=.3;tey=-.3;tr=-.05;}
-  if(state==='executing'){tex=Math.sin(T*6.5)*.3;tp+=.05;}
-  if(state==='speaking'){tp+=S.lv*.05*Math.sin(T*7);ty+=Math.sin(T*1.3)*.05;}
-  if(state==='disconnected'){ty=0;tp=.26;tex=0;tey=.2;tr=.03;}
-  if(T<nodUntil)tp+=.16*Math.sin((nodUntil-T)/.9*Math.PI*2);
-  // the text timeline: starts with the first real sound, so the lips are not ahead of the voice
-  let shO=-1,shW=0;
+
+  // ---- where he looks and how the head sits, by state ----
+  const fresh=now-pAt<3500; let ty=0,tp=0,tr=0,tex=0,tey=0,brow=0,frown=0,wideEye=0,squint=0,smile=0;
+  if(fresh){ty=px*.5;tp=py*.3;tex=px*.5;tey=py*.35;}else{ty=Math.sin(T*.31)*.14+Math.sin(T*.13)*.08;tp=Math.sin(T*.23)*.05;tex=Math.sin(T*.7)*.25;tey=Math.sin(T*.43)*.1;}
+  if(state==='idle')smile=.16;
+  if(state==='listening'){tr+=.1;tp+=.06;brow=.35;wideEye=.25;smile=.12;}
+  if(state==='understanding'){tr-=.06;tp+=.03;brow=.2;squint=.25;}
+  if(state==='thinking'){ty=.24+Math.sin(T*.8)*.07;tp=-.15;tex=.6;tey=-.55;tr=-.05;frown=.35;squint=.2;}
+  if(state==='executing'){tex=Math.sin(T*6.5)*.55;tp+=.05;squint=.3;}
+  if(state==='speaking'){tp+=S.lv*.04*Math.sin(T*7);ty+=Math.sin(T*1.3)*.05;brow=.1+S.lv*.2;}
+  if(state==='success')smile=1;
+  if(state==='error'){frown=.6;brow=.3;}
+  if(state==='disconnected'){ty=0;tp=.24;tex=0;tey=.5;tr=.03;frown=.3;}
+  if(T<smileUntil)smile=1;
+
+  // ---- the sentence being spoken: shapes for the lips, cues for the face ----
+  let shO=-1,shW=0,shP=0;
   if(talk){
     if(talk.t0<0&&(S.lv>.035||(!ext&&state==='speaking'&&now-talk.armed>300)))talk.t0=T;
     if(talk.t0<0){if(now-talk.armed>8000)talk=null;}
     else{const u=(T-talk.t0)/talk.dur;
       if(u>=1.15)talk=null;
-      else{const n=talk.open.length,f=clamp(u,0,.9999)*n,i=Math.floor(f),k=f-i,j=Math.min(i+1,n-1);
-        shO=talk.open[i]+(talk.open[j]-talk.open[i])*k;shW=talk.wide[i]+(talk.wide[j]-talk.wide[i])*k;
+      else{const n=talk.open.length,f=clamp(u,0,.9999)*n,i=Math.floor(f),k=f-i,j=Math.min(i+1,n-1),mix=a=>a[i]+(a[j]-a[i])*k;
+        shO=mix(talk.open);shW=mix(talk.wide);shP=mix(talk.press);
         while(talk.cues.length&&talk.cues[0].at<=u){const c=talk.cues.shift();gestures.push({type:c.type,at:T,dur:GDUR[c.type]||.8});}}}
   }
-  // a still head looks switched off: when idle he shifts, glances and tilts on his own
-  if(state==='idle'&&!talk&&T>nextFidget){gestures.push({type:['ask','think','beat','beat'][Math.floor(Math.random()*4)],at:T,dur:1.6});nextFidget=T+6+Math.random()*8;}
-  let gp=0,gy=0,gr=0,gSmile=0,gEye=0;
+  // a still face looks switched off: idle, he glances, tilts and raises a brow on his own
+  if(state==='idle'&&!talk&&T>nextFidget){gestures.push({type:['ask','think','beat','glance','glance'][Math.floor(Math.random()*5)],at:T,dur:1.6});nextFidget=T+5+Math.random()*7;}
+  let gp=0,gy=0,gr=0,gEx=0,gEy=0;
   for(let i=gestures.length-1;i>=0;i--){const g=gestures[i],u=(T-g.at)/g.dur;
     if(u>=1){gestures.splice(i,1);continue;} if(u<0)continue;
     const e=Math.sin(Math.PI*u);
     switch(g.type){
-      case'yes':gp+=.15*Math.sin(u*4*Math.PI)*e;break;
-      case'no':gy+=.2*Math.sin(u*5*Math.PI)*e;break;
-      case'ask':gr+=.13*e;gp-=.06*e;break;
-      case'greet':gp+=.13*Math.sin(u*2*Math.PI)*e;gSmile=Math.max(gSmile,e);break;
-      case'joy':gp-=.07*e;gSmile=Math.max(gSmile,e);break;
-      case'think':gy+=.2*e;gp-=.12*e;gEye=-.25*e;break;
-      case'laugh':gp+=.05*Math.sin(u*10*Math.PI);gSmile=1;break;
-      case'warn':gp+=.11*e;gr-=.05*e;break;
-      default:gp+=.05*e;}}
+      case'yes':gp+=.16*Math.sin(u*4*Math.PI)*e;smile=Math.max(smile,.5*e);break;
+      case'no':gy+=.2*Math.sin(u*5*Math.PI)*e;frown=Math.max(frown,.55*e);brow=Math.max(brow,.4*e);break;
+      case'ask':gr+=.13*e;gp-=.06*e;brow=Math.max(brow,.9*e);wideEye=Math.max(wideEye,.3*e);break;
+      case'greet':gp+=.13*Math.sin(u*2*Math.PI)*e;smile=Math.max(smile,e);brow=Math.max(brow,.5*e);break;
+      case'joy':gp-=.07*e;smile=Math.max(smile,e);brow=Math.max(brow,.6*e);wideEye=Math.max(wideEye,.25*e);break;
+      case'think':gy+=.2*e;gp-=.1*e;gEx+=.5*e;gEy-=.5*e;squint=Math.max(squint,.35*e);frown=Math.max(frown,.25*e);break;
+      case'laugh':gp+=.05*Math.sin(u*10*Math.PI);smile=1;squint=Math.max(squint,.6*e);break;
+      case'warn':gp+=.11*e;gr-=.05*e;frown=Math.max(frown,.7*e);wideEye=Math.max(wideEye,.4*e);break;
+      case'glance':gEx+=.7*e*(g.at%2<1?1:-1);break;
+      default:gp+=.05*e;brow=Math.max(brow,.25*e);}}
   S.yaw=damp(S.yaw,ty,5,dt);S.pitch=damp(S.pitch,tp,5,dt);S.roll=damp(S.roll,tr,4,dt);
-  const hp_=S.pitch+gp,hy_=S.yaw+gy,hr_=S.roll+gr;
-  S.ex=damp(S.ex,tex,9,dt);S.ey=damp(S.ey,tey+gEye,9,dt);
-  let mouthT=0;
-  if(state==='speaking'){
-    // letters give the shape, the audio gives the force; with no text it follows loudness alone
-    mouthT=shO>=0?shO*(.3+.7*clamp(S.lv*1.8,0,1)):clamp(S.lv*1.25,0,1);
-    if(ext&&S.lv<.02)mouthT=0;
-  }
-  S.mouth=damp(S.mouth,mouthT,30,dt);
-  S.wide=damp(S.wide,state==='speaking'&&shO>=0?shW:0,18,dt);
-  S.smile=damp(S.smile,Math.max(gSmile,(T<smileUntil||state==='success')?1:(state==='idle'||state==='listening'?.18:0)),6,dt);
+  S.ex=damp(S.ex,clamp(tex+gEx,-1,1),10,dt);S.ey=damp(S.ey,clamp(tey+gEy,-1,1),10,dt);
+  S.brow=damp(S.brow,brow,8,dt);S.frown=damp(S.frown,frown,7,dt);S.wideEye=damp(S.wideEye,wideEye,8,dt);
+  S.squint=damp(S.squint,squint,8,dt);S.smile=damp(S.smile,smile,6,dt);
   S.gray=damp(S.gray,state==='disconnected'?1:0,4,dt);
 
-  for(const k in B)B[k].quaternion.copy(G.userData.rest[k].q);
-  mixer.update(dt);
-  add('Spine2',hp_*.15,hy_*.2,0);add('Neck',hp_*.35,hy_*.35,hr_*.4);add('Head',hp_*.6,hy_*.55,hr_*.6);
-  add('LeftEye',S.ey,S.ex,0);add('RightEye',S.ey,S.ex,0);
-  for(const f of faces){const d=f.morphTargetDictionary,inf=f.morphTargetInfluences;
-    if(d.mouthOpen!=null)inf[d.mouthOpen]=S.mouth*.85;if(d.mouthSmile!=null)inf[d.mouthSmile]=clamp(S.smile*.75+S.wide*.35,0,1);}
-  G.userData.wrap.updateMatrixWorld(true);
-  B.Head.getWorldPosition(hp);B.Neck.getWorldPosition(np);
-  FU.uNeck.value=damp(FU.uNeck.value,np.y+.012,first?999:10,dt);FU.uGray.value=S.gray;
+  // ---- lips ----
+  let mo=0,mw=0,mp=0;
+  if(state==='speaking'){
+    if(shO>=0){const force=.3+.7*clamp(S.lv*1.8,0,1);mo=shO*force;mw=shW;mp=shP;}   // letters give the shape, the audio the force
+    else mo=clamp(S.lv*1.25,0,1);
+    if(ext&&S.lv<.02){mo=0;mw=0;mp=0;}
+  }
+  S.open=damp(S.open,mo,30,dt);S.wide=damp(S.wide,mw,20,dt);S.press=damp(S.press,mp,28,dt);
+
+  // ---- blinking: the single cheapest sign of life ----
+  if(blinkT<0&&T>blinkAt){blinkT=0;blinkTwice=Math.random()<.18;}
+  let blink=0;
+  if(blinkT>=0){blinkT+=dt;const d=.15,u=blinkT/d;blink=u<1?Math.sin(Math.PI*u):0;
+    if(u>=1){blinkT=-1;if(blinkTwice){blinkTwice=false;blinkAt=T+.12;}else blinkAt=T+2.2+Math.random()*4.2;}}
+  if(state==='disconnected')blink=Math.max(blink,.55);
+
+  // ---- compose the face ----
+  for(const k in W)W[k]=0;
+  put('jawOpen',S.open*.62);both('mouthLowerDown',S.open*.35);both('mouthUpperUp',S.open*.16);
+  const round=Math.max(0,-S.wide),spread=Math.max(0,S.wide);
+  put('mouthFunnel',round*.75*(.35+S.open));put('mouthPucker',round*.45);
+  both('mouthStretch',spread*.4);both('mouthDimple',spread*.2);
+  both('mouthPress',S.press*.75);put('mouthClose',S.press*S.open*.5);put('mouthRollLower',S.press*.3);
+  both('mouthSmile',clamp(S.smile*.72+spread*.22,0,1));both('cheekSquint',S.smile*.45);
+  both('mouthFrown',S.frown*.7);put('mouthShrugLower',S.frown*.3);
+  put('browInnerUp',clamp(S.brow+S.frown*.35,0,1));both('browOuterUp',S.brow*.7);both('browDown',clamp(S.squint*.6+S.frown*.25-S.brow,0,1));
+  both('eyeWide',S.wideEye);both('eyeSquint',clamp(S.squint+S.smile*.35,0,1));
+  both('eyeBlink',clamp(blink+Math.max(0,S.ey)*.25,0,1));
+  // lids follow the gaze, as real ones do
+  const lx=S.ex,ly=S.ey;
+  put('eyeLookUp_L',Math.max(0,-ly));put('eyeLookUp_R',Math.max(0,-ly));put('eyeLookDown_L',Math.max(0,ly));put('eyeLookDown_R',Math.max(0,ly));
+  put('eyeLookOut_L',Math.max(0,lx));put('eyeLookIn_R',Math.max(0,lx));put('eyeLookIn_L',Math.max(0,-lx));put('eyeLookOut_R',Math.max(0,-lx));
+  for(const k in W){const i=dict[k];if(i!=null)inf[i]=W[k];}
+  if(eyeL){eyeL.rotation.set(eyeRest.l.x+ly*.32,eyeRest.l.y+lx*.42,eyeRest.l.z);eyeR.rotation.set(eyeRest.r.x+ly*.32,eyeRest.r.y+lx*.42,eyeRest.r.z);}
+
+  // ---- the head itself ----
+  const breathe=Math.sin(T*1.25);
+  pivot.rotation.set(S.pitch*.9+gp+breathe*.008,S.yaw*.95+gy,S.roll+gr,'YXZ');
+  pivot.position.y=breathe*.0025;
+  pivot.updateMatrixWorld(true);
+  cen.set(0,HEAD_H*.52,0).applyMatrix4(pivot.matrixWorld);
+  FU.uGray.value=S.gray;
+
   // colours follow the state
   acc.lerp(accT,1-Math.exp(-5*dt));rimL.color.copy(acc);rimR.color.copy(acc);
   const pulse=state==='thinking'||state==='understanding'?.5+.5*Math.sin(T*3):state==='executing'?.5+.5*Math.sin(T*8):.6;
-  rimL.intensity=(5+S.lv*9+pulse*3)*(1-S.gray*.7);rimR.intensity=rimL.intensity*.7;
-  rimL.position.set(hp.x-.55,hp.y+.2,hp.z-.25);rimR.position.set(hp.x+.55,hp.y+.05,hp.z-.3);
+  rimL.intensity=(.28+S.lv*.4+pulse*.16)*(1-S.gray*.7);rimR.intensity=rimL.intensity*.8;
+  rimL.position.set(-.34,HEAD_H*.75,-.3);rimR.position.set(.34,HEAD_H*.4,-.3);
   // HUD rings behind the head
-  const cy=hp.y+.085;
-  hud.position.set(hp.x*.6,cy,hp.z-.26);hud.quaternion.copy(camera.quaternion);
+  hud.position.set(0,HEAD_H*.55,-.2);hud.quaternion.copy(camera.quaternion);
   const spin=state==='thinking'||state==='executing'?2.6:state==='disconnected'?.15:1;
   arcs.forEach((m,i)=>{m.rotation.z+=dt*spin*(i%2?-.45:.3)*(1+i*.18);});
-  S.hudS=damp(S.hudS,1+S.lv*.16,14,dt);hud.scale.setScalar(S.hudS);
-  hudMat.opacity=(.3+S.lv*.5+pulse*.12)*(1-S.gray*.6);glow.material.opacity=(.32+S.lv*.4)*(1-S.gray*.7);
-  // dissolving motes
-  for(let i=0;i<PN;i++){const s=pSeed[i],ph=(T*(.12+s*.16)+s*7.3)%1,a=s*61.7+T*.2*(s-.5),r=.05+((s*13.37)%1)*.2;
-    pPos[i*3]=np.x+Math.cos(a)*r;pPos[i*3+1]=np.y+.01-ph*.3;pPos[i*3+2]=np.z+Math.sin(a)*r*.7;}
-  pGeo.attributes.position.needsUpdate=true;motes.material.opacity=.75*(1-S.gray*.6);
-  // camera keeps the head framed (slightly bigger while speaking / listening)
-  S.camZ=damp(S.camZ,state==='speaking'||state==='listening'?.93:1,3,dt);
-  const tgt=_v.set(hp.x*.5,cy-.015,hp.z);
-  if(first){controls.target.copy(tgt);camera.position.set(tgt.x,tgt.y+.02,tgt.z+camDist());first=false;}
+  S.hudS=damp(S.hudS,1+S.lv*.16,14,dt);hud.scale.setScalar(S.hudS*.72);
+  hudMat.opacity=(.3+S.lv*.5+pulse*.12)*(1-S.gray*.6);glow.material.opacity=(.3+S.lv*.4)*(1-S.gray*.7);
+  // motes drifting off where the neck dissolves
+  for(let i=0;i<PN;i++){const s=pSeed[i],ph=(T*(.12+s*.16)+s*7.3)%1,a=s*61.7+T*.2*(s-.5),r=.015+((s*13.37)%1)*.075;
+    pPos[i*3]=Math.cos(a)*r;pPos[i*3+1]=.035-ph*.2;pPos[i*3+2]=Math.sin(a)*r*.8-.01;}
+  pGeo.attributes.position.needsUpdate=true;motes.material.opacity=.7*(1-S.gray*.6);
+  // camera keeps the head framed (a little closer while speaking / listening)
+  S.camZ=damp(S.camZ,state==='speaking'||state==='listening'?.94:1,3,dt);
+  const tgt=_v.set(0,HEAD_H*.5,0);
+  if(first){controls.target.copy(tgt);camera.position.set(0,tgt.y+.01,camDist());first=false;}
   else{const d=camera.position.clone().sub(controls.target).setLength(camDist()*S.camZ);controls.target.lerp(tgt,1-Math.exp(-6*dt));camera.position.copy(controls.target).add(d);}
   controls.update();renderer.render(scene,camera);
 }
@@ -313,14 +307,26 @@ Object.keys(ST).forEach(k=>{const b=document.createElement('button');b.dataset.s
 /* ===================== BOOT ===================== */
 (async()=>{
   try{
-    const [g,a]=await Promise.all([loadGLB('jarvis.glb'),loadGLB('anim.glb')]);
-    const lib={};a.animations.forEach(c=>{if(['idle','agree','headShake'].includes(c.name))lib[c.name]=bake(a,c);});
-    G=g;B=g.userData.bones;mixer=g.userData.mixer;
-    for(const n in lib)ACT[n]=mixer.clipAction(makeClip(n,lib[n],g));
-    g.scene.traverse(o=>{if(!o.isMesh)return;(Array.isArray(o.material)?o.material:[o.material]).forEach(fadeMat);
-      if(o.morphTargetDictionary)faces.push(o);});
-    mixer.addEventListener('finished',()=>{if(state==='success'||state==='error')setState('idle');else fadeTo('idle');});
-    scene.add(g.userData.wrap);fadeTo('idle');
+    const g=await loadModel(),model=g.scene;
+    model.traverse(o=>{
+      if(o.name==='grp_eyeLeft')eyeL=o; if(o.name==='grp_eyeRight')eyeR=o;
+      if(!o.isMesh)return; o.frustumCulled=false;
+      if(o.morphTargetDictionary&&o.morphTargetDictionary.jawOpen!=null){face=o;
+        // the sculpt's texture is near-monochrome: tinting it gives the skin its colour, eyes and teeth keep theirs
+        o.material=o.material.clone();o.material.color.set('#dcab8e');o.material.roughness=.58;o.material.metalness=0;}
+      else{o.material=o.material.clone();o.material.roughness=.25;}
+      fadeMat(o.material);
+    });
+    if(!face)throw new Error('no face mesh');
+    dict=face.morphTargetDictionary;inf=face.morphTargetInfluences;
+    if(eyeL){eyeRest.l.copy(eyeL.rotation);eyeRest.r.copy(eyeR.rotation);}
+    // stand the head on the origin, crown to chin HEAD_H tall, turning around the top of the neck
+    const box=new THREE.Box3().setFromObject(model),size=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3());
+    const k=HEAD_H/size.y;model.scale.multiplyScalar(k);
+    model.position.set(-c.x*k,-box.min.y*k,-c.z*k+HEAD_H*.06);
+    pivot.add(model);
+    FU.uNeck.value=HEAD_H*.075;FU.uLen.value=HEAD_H*.075;       // the jaw is whole; below it he thins into light
+    ready=true;
     if(window.JARVIS_INIT)setState(window.JARVIS_INIT);
     $('load').classList.add('off');
     try{window.JarvisHost&&window.JarvisHost.onReady&&window.JarvisHost.onReady();}catch(_){}

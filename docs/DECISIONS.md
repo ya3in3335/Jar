@@ -304,3 +304,21 @@ seen from here:
   `MediaPlayer`, and that path is kept for the session.
 
 The voice level for the mouth now comes from playback itself, not the mic.
+
+## D18 — A sculpted head with real facial blendshapes replaces the game-style avatar
+
+The head is now the Face Cap sample head from the three.js examples: a
+realistic sculpt with 52 ARKit blendshapes, separate eyeballs and teeth. It
+replaces the Ready Player Me avatar and the Mixamo clips, which are gone
+along with the skeleton retargeting code.
+
+What that buys: the lips make real shapes (jaw, funnel and pucker for
+rounded vowels, stretch for spread ones, pressed lips for م/ب), he blinks,
+his brows and lids move with what he says, and his eyes turn in their
+sockets. Nods and shakes are procedural, on the head as a whole.
+
+What it costs: the model is a head only — no neck, hair or shoulders — and
+its texture is near-monochrome, so the skin tone is a tint. It was converted
+once from the meshopt/KTX2 original to a plain `.glb` so the page needs no
+extra decoders. As before, swap `models/face.glb` for a head you own before
+a public release; any head with ARKit blendshape names will work unchanged.
