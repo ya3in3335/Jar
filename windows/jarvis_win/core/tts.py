@@ -293,6 +293,73 @@ def play_mp3(data: bytes, stop_flag: threading.Event | None = None) -> None:
         sd.wait()
 
 
+class GroqTtsProvider(TtsProvider):
+    """Groq's Orpheus voices, Arabic and English, on the Groq key.
+
+    One request takes at most 200 characters, so a reply is spoken piece by
+    piece. The service has no pitch or rate control and the audio is played
+    as it was made, so those two settings do not apply to these voices.
+    """
+
+    id = "groq"
+    label = "أصوات Groq (عربية وإنجليزية)"
+
+    def __init__(self, client) -> None:
+        self._client = client
+        self._stop = threading.Event()
+
+    def is_available(self) -> bool:
+        return self._client.has_key()
+
+    def voices(self) -> list[Voice]:
+        from .groq import VOICES
+
+        return [Voice(id=v[0], name=v[1], locale=v[2], gender=v[3], provider=self.id) for v in VOICES]
+
+    def speak(self, text: str, voice: str | None, pitch: str, rate: str) -> None:
+        from .groq import GroqError, split_for_speech, voice_spec, wav_to_pcm
+
+        self._stop.clear()
+        model, name = voice_spec(voice, text)
+        for piece in split_for_speech(text):
+            if self._stop.is_set():
+                return
+            try:
+                pcm, sample_rate = wav_to_pcm(self._client.speech(model, name, piece))
+            except GroqError as exc:
+                raise TtsError(str(exc)) from exc
+            if self._stop.is_set():
+                return
+            # play_pcm clears the flag it is given, so it gets its own view
+            # of "stop" through the same event after the check above.
+            _play_until_stopped(pcm, sample_rate, self._stop)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def _play_until_stopped(pcm: bytes, sample_rate: int, stop_flag: threading.Event) -> None:
+    """Like [play_pcm], but a stop requested before playback starts still counts."""
+    try:
+        import numpy as np
+        import sounddevice as sd
+    except ImportError as exc:
+        raise TtsError("حزم تشغيل الصوت غير مثبّتة") from exc
+
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if samples.size == 0 or stop_flag.is_set():
+        return
+    sd.play(samples, sample_rate)
+    try:
+        while sd.get_stream().active:
+            if stop_flag.is_set():
+                sd.stop()
+                return
+            sd.sleep(50)
+    except Exception:
+        sd.wait()
+
+
 def pick_provider(providers: list[TtsProvider], preferred_id: str | None = None) -> TtsProvider | None:
     """First available provider, preferring the user's choice."""
     if preferred_id:

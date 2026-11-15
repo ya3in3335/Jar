@@ -13,15 +13,16 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from .config import Settings, get_azure_key, get_openrouter_key
+from .config import Settings, get_azure_key, get_groq_key
 from .files import DeletionPlan, DeletionResult, execute
+from .groq import GroqClient, GroqError, run_agent
 from .intent import route
 from .listener import ListenerCallbacks, VoiceListener
 from .state import AssistantState
-from .stt import AzureSttProvider, SttProvider, Transcript, WhisperSttProvider
+from .stt import AzureSttProvider, GroqSttProvider, SttProvider, Transcript, WhisperSttProvider
 from .stt import pick_provider as pick_stt
 from .tools import ToolRegistry, ToolResult
-from .tts import AzureTtsProvider, Sapi5TtsProvider, TtsProvider, Voice
+from .tts import AzureTtsProvider, GroqTtsProvider, Sapi5TtsProvider, TtsProvider, Voice
 from .tts import pick_provider as pick_tts
 
 log = logging.getLogger(__name__)
@@ -44,14 +45,24 @@ class Controller(QObject):
 
         # The Azure key lives in the OS credential store, never in settings.
         azure_key = get_azure_key()
+        # The key is read on every call, so one saved in the settings dialog
+        # takes effect without restarting.
+        self.groq = GroqClient(get_groq_key)
+        # Groq first: with only that key the packaged app can hear, think
+        # and speak. The others stay as choices and as fallbacks.
         self._stt_providers: list[SttProvider] = [
+            GroqSttProvider(self.groq),
             WhisperSttProvider(model_size=settings.whisper_model),
             AzureSttProvider(azure_key, settings.azure_region),
         ]
         self._tts_providers: list[TtsProvider] = [
+            GroqTtsProvider(self.groq),
             Sapi5TtsProvider(),
             AzureTtsProvider(azure_key, settings.azure_region),
         ]
+        self._history: list[dict] = []
+        self._agent_thread: threading.Thread | None = None
+        self._cancelled = threading.Event()
 
         self._listener: VoiceListener | None = None
         self._speak_thread: threading.Thread | None = None
@@ -84,9 +95,7 @@ class Controller(QObject):
 
         provider = self.stt_available()
         if provider is None:
-            self.error_shown.emit(
-                "لا يوجد محرّك تعرّف متاح. ثبّت faster-whisper أو اضبط مفتاح أزور."
-            )
+            self.error_shown.emit("لا يوجد محرّك تعرّف متاح — أضف مفتاح Groq من «الإعدادات».")
             self._go(AssistantState.IDLE)
             return
 
@@ -123,12 +132,7 @@ class Controller(QObject):
 
         intent = route(text)
         if intent is None:
-            # Without the model wired in, say so rather than look broken.
-            if not get_openrouter_key():
-                self.error_shown.emit("هذا الطلب يحتاج نموذجًا — أضف مفتاح OpenRouter من الإعدادات")
-                self._go(AssistantState.ERROR)
-            else:
-                self._go(AssistantState.THINKING)
+            self._ask_model(text)
             return
 
         tool = self.registry.find(intent.tool)
@@ -140,6 +144,60 @@ class Controller(QObject):
         self._go(AssistantState.EXECUTING)
         result: ToolResult = tool.run(dict(intent.args))
         self._finish_tool(result)
+
+    def _ask_model(self, text: str) -> None:
+        """Anything the local router does not recognise goes to the model."""
+        if not self.groq.has_key():
+            self.error_shown.emit("هذا الطلب يحتاج النموذج — أضف مفتاح Groq من «الإعدادات»")
+            self._go(AssistantState.ERROR)
+            return
+        if self._agent_thread is not None and self._agent_thread.is_alive():
+            return  # one request at a time; Stop ends the current one
+
+        self._cancelled.clear()
+
+        def run() -> None:
+            self._go(AssistantState.THINKING)
+            try:
+                outcome = run_agent(
+                    self.groq,
+                    self.settings.model,
+                    text,
+                    self._history,
+                    self.registry,
+                    max_tool_calls=self.settings.max_tool_calls,
+                    max_tokens=self.settings.max_output_tokens,
+                    on_tool=lambda _name: self._go(AssistantState.EXECUTING),
+                    cancelled=self._cancelled.is_set,
+                )
+            except GroqError as exc:
+                self.error_shown.emit(str(exc))
+                self._go(AssistantState.ERROR)
+                return
+            except Exception as exc:  # never leave the window stuck on "thinking"
+                log.warning("agent failed: %s", type(exc).__name__)
+                self.error_shown.emit(f"تعذّر إكمال الطلب: {type(exc).__name__}")
+                self._go(AssistantState.ERROR)
+                return
+
+            if outcome.cancelled:
+                return
+            if outcome.pending is not None:
+                # Deletion stops here until the user approves the exact list.
+                self.approval_requested.emit(*outcome.pending)
+                self._go(AssistantState.IDLE)
+                return
+
+            self._history += [{"role": "user", "content": text}, {"role": "assistant", "content": outcome.text}]
+            del self._history[:-12]
+            self.text_shown.emit(outcome.text)
+            if self.settings.auto_speak:
+                self.speak(outcome.text)
+            else:
+                self._go(AssistantState.SUCCESS)
+
+        self._agent_thread = threading.Thread(target=run, name="jarvis-agent", daemon=True)
+        self._agent_thread.start()
 
     def _finish_tool(self, result: ToolResult) -> None:
         if result.pending is not None:
@@ -197,7 +255,17 @@ class Controller(QObject):
             try:
                 provider.speak(text, self.settings.voice, self.settings.voice_pitch, self.settings.voice_rate)
             except Exception as exc:
+                # Say why the chosen voice failed, then still speak with
+                # whatever else this machine has.
                 self.error_shown.emit(str(exc))
+                for other in self._tts_providers:
+                    if other is provider or not other.is_available():
+                        continue
+                    try:
+                        other.speak(text, None, self.settings.voice_pitch, self.settings.voice_rate)
+                        break
+                    except Exception:
+                        continue
             finally:
                 self._go(AssistantState.IDLE)
 
@@ -207,6 +275,7 @@ class Controller(QObject):
     @Slot()
     def cancel(self) -> None:
         """Always available: an action the user cannot abort is a bug."""
+        self._cancelled.set()
         self._stop_listening()
         for provider in self._tts_providers:
             try:

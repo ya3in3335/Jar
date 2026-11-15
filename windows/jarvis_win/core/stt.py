@@ -201,6 +201,34 @@ class AzureSttProvider(SttProvider):
         )
 
 
+class GroqSttProvider(SttProvider):
+    """Whisper on Groq's servers: needs the Groq key and nothing installed.
+
+    This is what makes dictation work in the packaged app, where the local
+    Whisper engine cannot be bundled.
+    """
+
+    id = "groq"
+    label = "Groq (Whisper سحابي)"
+
+    def __init__(self, client, language: str | None = None) -> None:
+        self._client = client
+        #: None lets Whisper detect the language, which suits mixed speech.
+        self.language = language
+
+    def is_available(self) -> bool:
+        return self._client.has_key()
+
+    def transcribe(self, pcm: bytes, sample_rate: int = SAMPLE_RATE) -> Transcript:
+        from .groq import GroqError
+
+        try:
+            text = self._client.transcribe(pcm_to_wav(pcm, sample_rate), self.language)
+        except GroqError as exc:
+            raise SttError(str(exc)) from exc
+        return Transcript(text=text, language=self.language, duration_ms=len(pcm) * 1000 // (2 * sample_rate))
+
+
 class SttError(RuntimeError):
     """Recognition failed for a reason worth showing the user."""
 
