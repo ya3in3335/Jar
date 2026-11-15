@@ -31,7 +31,8 @@ controls.enableZoom=false; controls.enablePan=false; controls.enableDamping=true
 controls.minAzimuthAngle=-.6; controls.maxAzimuthAngle=.6; controls.minPolarAngle=1.25; controls.maxPolarAngle=1.72;
 const pm=new THREE.PMREMGenerator(renderer); scene.environment=pm.fromScene(new RoomEnvironment(),.05).texture; scene.environmentIntensity=.55;
 scene.add(new THREE.HemisphereLight('#d7ebff','#101826',.55));
-const keyL=new THREE.DirectionalLight('#fff3e2',2.4); keyL.position.set(1.2,2.6,2.4); scene.add(keyL);
+const keyL=new THREE.DirectionalLight('#fff1de',2.1); keyL.position.set(1.4,2.2,2.6); scene.add(keyL);
+const fillL=new THREE.DirectionalLight('#cfe0ff',.55); fillL.position.set(-2,.6,1.6); scene.add(fillL);
 const rimL=new THREE.PointLight('#4fd8ff',7,3,2), rimR=new THREE.PointLight('#4fd8ff',5,3,2); scene.add(rimL,rimR);
 const acc=new THREE.Color('#4fd8ff'), accT=new THREE.Color('#4fd8ff');
 
@@ -62,6 +63,8 @@ function fadeMat(m,x={}){
       .replace('#include <project_vertex>','#include <project_vertex>\n vWY=(modelMatrix*vec4(transformed,1.0)).y;');
     sh.fragmentShader='varying float vWY;uniform float uNeck,uLen,uGray;uniform vec3 uCol;\n'+(x.fHead||'')+sh.fragmentShader
       .replace('#include <color_fragment>','#include <color_fragment>\n'+(x.fColor||''))
+      .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\n'+(x.fNormal||''))
+      .replace('#include <opaque_fragment>',(x.fLight||'')+'\n#include <opaque_fragment>')
       .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
        float jf=smoothstep(uNeck-uLen,uNeck,vWY);
@@ -87,19 +90,26 @@ float vn3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
 // how far inside the hairline a point is (negative: bare skin)
 float hairIn(vec3 n){
   float sx=abs(n.x-.5)*2.;
-  float H=mix(.15,.63,smoothstep(.33,.40,n.z));                 // all of the back; curving up round the ear
-  H=mix(H,.50,smoothstep(.50,.53,n.z));                         // sideburn in front of the ear
-  H=mix(H,.76,smoothstep(.56,.66,n.z));                         // temple
-  H=mix(H,.865+sx*sx*.04,smoothstep(.70,.86,n.z));              // forehead, a touch higher at the corners
+  float H=mix(.15,.63,smoothstep(.31,.37,n.z));                 // all of the back; curving up round the ear
+  H=mix(H,.50,smoothstep(.445,.475,n.z));                         // sideburn in front of the ear
+  H=mix(H,.77,smoothstep(.60,.69,n.z));                         // temple
+  H=mix(H,.865+sx*sx*.04,smoothstep(.72,.87,n.z));              // forehead, a touch higher at the corners
   return n.y-H+(vn3(n*90.)-.5)*.035;}
 `;
 const SKIN_X={key:'skin',uniforms:HU,
   vHead:'varying vec3 vH;uniform mat4 uHM;\n',vBegin:'vH=(uHM*vec4(position,1.)).xyz;',
-  fHead:'varying vec3 vH;'+HAIR_GLSL,
+  fHead:'varying vec3 vH;float vSkinLip=0.;'+HAIR_GLSL,
+  fNormal:`{float hgt=vn3(vH*uBSize*2600.)*.6+vn3(vH*uBSize*900.)*.4;
+    vec3 dpx=dFdx(-vViewPosition),dpy=dFdy(-vViewPosition);float hx=dFdx(hgt),hy=dFdy(hgt);
+    vec3 r1=cross(dpy,normal),r2=cross(normal,dpx);float det=dot(dpx,r1);
+    normal=normalize(abs(det)*normal-sign(det)*(hx*r1+hy*r2)*.00011);}`,
+  fLight:`{float fr=pow(1.-clamp(dot(normalize(normal),normalize(vViewPosition)),0.,1.),2.2);
+    outgoingLight+=diffuseColor.rgb*vec3(.55,.16,.10)*fr*.55;          // light bleeding through at grazing angles
+    outgoingLight=mix(outgoingLight,outgoingLight*vec3(1.05,.97,.95),.5);}`,
   fColor:`{float sx=abs(vH.x-.5)*2.;
     float hi=hairIn(vH);
     // scalp under the hair, shading off into the skin so the hairline is not a painted edge
-    diffuseColor.rgb=mix(diffuseColor.rgb,uHair*.55,smoothstep(-.035,.03,hi)*.94);
+    diffuseColor.rgb=mix(diffuseColor.rgb,uHair*.55,smoothstep(-.05,.05,hi)*.94);
     // eyebrows
     vec2 bp=vec2((sx-BR_X)/BR_W,(vH.y-(BR_Y+BR_ARCH*(1.-pow(abs((sx-BR_X)/BR_W),2.))-sx*BR_TILT))/BR_H);
     float br=smoothstep(1.,.35,length(bp))*smoothstep(.55,.8,vH.z)*(.55+.45*vn3(vH*vec3(160.,420.,160.)));
@@ -110,12 +120,22 @@ const SKIN_X={key:'skin',uniforms:HU,
     float cheek=smoothstep(ST_TOP-.02,ST_TOP-.16,vH.y+ (1.-sx)*CH_DIP*smoothstep(.75,1.,vH.z));
     float st=jaw*cheek*lipHole*(.6+.4*vn3(vH*520.));
     diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.62,.60,.62)+uHair*.10,st*ST_K);
+    // lips, and blood nearer the surface on cheeks, nose and ears
+    float lip=smoothstep(1.,.55,length(vec2(sx/LIP_W,(vH.y-LIP_Y)/LIP_H)))*smoothstep(.78,.86,vH.z);
+    diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.02,.66,.64),lip*.85);
+    float flush=smoothstep(1.,.2,length(vec2((sx-.5)/.26,(vH.y-.36)/.11)))*smoothstep(.6,.8,vH.z)
+      +smoothstep(1.,.3,length(vec2(sx/.16,(vH.y-.385)/.05)))*smoothstep(.9,.97,vH.z)*.8
+      +smoothstep(.86,.97,sx)*.9;
+    diffuseColor.rgb*=mix(vec3(1.),vec3(1.06,.90,.88),clamp(flush,0.,1.)*.75);
+    // skin is never one flat colour
+    diffuseColor.rgb*=.94+.12*vn3(vH*vec3(38.,52.,38.));
+    vSkinLip=lip;
     if(uDbg>.5){vec3 g=fract(vH*10.);float l=step(.94,g.y)+step(.94,g.z)*.6+step(.94,g.x)*.3;diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.,0.,0.),min(l,1.));
       if(fract(vH.y*2.)>.97||fract(vH.z*2.)>.97)diffuseColor.rgb=vec3(0.,1.,0.);}
   }`};
-const P={BR_X:'.36',BR_W:'.26',BR_Y:'.600',BR_ARCH:'.012',BR_TILT:'.0',BR_H:'.022',BR_K:'1.1',ST_TOP:'.36',LP_W:'.30',LP_Y:'.215',LP_H:'.035',CH_DIP:'.0',ST_K:'.55'};
+const P={BR_X:'.36',BR_W:'.26',BR_Y:'.600',BR_ARCH:'.012',BR_TILT:'.0',BR_H:'.022',BR_K:'1.1',ST_TOP:'.36',LP_W:'.30',LP_Y:'.215',LP_H:'.035',CH_DIP:'.0',ST_K:'.55',LIP_W:'.30',LIP_Y:'.222',LIP_H:'.036'};
 for(const k in P)SKIN_X.fColor=SKIN_X.fColor.split(k).join(P[k]);
-const SHELLS=16, HAIR_LEN=.011;          // metres at the crown
+const SHELLS=22, HAIR_LEN=.012;          // metres at the crown
 function growHair(face,parent){
   const g=face.geometry,pos=g.attributes.position,_p=new THREE.Vector3();
   // keep only the triangles that can carry hair
@@ -136,9 +156,9 @@ function growHair(face,parent){
       fHead:'varying vec3 vH;varying float vLs;uniform float uH;'+HAIR_GLSL,
       fColor:`{float hi=hairIn(vH);if(hi<0.)discard;
         vec3 q=vH*uBSize*STRAND;float r=h31(floor(q)),r2=h31(floor(q*.37)+7.);
-        float thick=mix(.55,1.,smoothstep(0.,.06,hi));
+        float thick=mix(.30,1.,smoothstep(0.,.10,hi));
         if(r*thick<uH*uH*.96+.02)discard;
-        diffuseColor.rgb=uHair*(.50+1.25*uH)*(.75+.5*r2);}`.replace('STRAND','1700.')});
+        diffuseColor.rgb=uHair*(.50+1.25*uH)*(.75+.5*r2);}`.replace('STRAND','2400.')});
     const sh=new THREE.Mesh(hg,m);sh.frustumCulled=false;sh.renderOrder=i;grp.add(sh);}
   grp.position.copy(face.position);grp.quaternion.copy(face.quaternion);grp.scale.copy(face.scale);parent.add(grp);return grp;}
 
@@ -155,10 +175,15 @@ const sstep=(a,b,x)=>{x=clamp((x-a)/(b-a),0,1);return x*x*(3-2*x);}, mix=(a,b,t)
 function buildBody(){
   const NZ=y=>-.03+y*.13;                                    // the neck leans forward as it rises
   // neck, darker where the jaw shades it
-  const skinTex=canvasTex(8,128,(x,w,h)=>{const g=x.createLinearGradient(0,0,0,h);g.addColorStop(0,'#4a3226');g.addColorStop(.30,'#7d5946');g.addColorStop(.5,'#ab8066');g.addColorStop(1,'#b78a6e');x.fillStyle=g;x.fillRect(0,0,w,h);});
-  const skin=new THREE.MeshStandardMaterial({map:skinTex,roughness:.62,metalness:0});fadeMat(skin);
+  const skinTex=canvasTex(8,128,(x,w,h)=>{const g=x.createLinearGradient(0,0,0,h);g.addColorStop(0,'#33211a');g.addColorStop(.30,'#5e4233');g.addColorStop(.48,'#86614c');g.addColorStop(1,'#946c55');x.fillStyle=g;x.fillRect(0,0,w,h);});
+  const skin=new THREE.MeshPhysicalMaterial({map:skinTex,roughness:.56,metalness:0,sheen:.5,sheenColor:new THREE.Color('#ffb59a'),sheenRoughness:.45,specularIntensity:.5});
+  fadeMat(skin,{key:'neck',vHead:'varying vec3 vNP;\n',vBegin:'vNP=position;',fHead:'varying vec3 vNP;'+HAIR_GLSL,
+    fColor:'diffuseColor.rgb*=.93+.14*vn3(vNP*vec3(160.,220.,160.));'});
   ringSurf((u,v,t)=>{const a=u*Math.PI*2,y=mix(.10,-.20,v),w=sstep(-.05,-.19,y);
-    const rx=.057+.06*w+.004*Math.cos(a*2),rz=.061+.012*w;
+    const up=sstep(-.02,.07,y);
+    // two cords run from behind the ear to the collarbone, with a hollow between them at the throat
+    const cord=Math.exp(-Math.pow((Math.abs(Math.sin(a))-.62)/.2,2))*Math.max(0,Math.cos(a)+.25)*.0035;
+    const rx=.059+.06*w+.010*up+.004*Math.cos(a*2)+cord,rz=.062+.012*w+.008*up+cord;
     // the throat stands a little proud in front
     const adam=Math.exp(-Math.pow((y+.02)/.016,2))*Math.max(0,Math.cos(a))**6*.004;
     t.set(Math.sin(a)*rx,y,NZ(y)+Math.cos(a)*(rz+adam));},48,24,skin);
@@ -190,7 +215,7 @@ function buildBody(){
     const cv=clamp(v/VC,0,1), bv=clamp((v-VC)/(1-VC),0,1);
     const y=v<VC?mix(top,base,cv):mix(base,-.27,bv), w=sstep(0,1,bv*.9);
     const flare=(1-cv)*(1-cv)*(.004+.014*edge);                // the collar leans away from the neck, more at its points
-    const rx=.074+.175*w+flare,rz=.078+.07*w+flare;
+    const rx=.069+.18*w+flare,rz=.074+.074*w+flare;
     t.set(Math.sin(a)*rx,y,NZ(Math.max(y,-.06))+Math.cos(a)*rz);},96,32,jk);
 }
 buildBody();
@@ -392,6 +417,7 @@ function tick(now){
   const lx=S.ex,ly=S.ey;
   put('eyeLookUp_L',Math.max(0,-ly));put('eyeLookUp_R',Math.max(0,-ly));put('eyeLookDown_L',Math.max(0,ly));put('eyeLookDown_R',Math.max(0,ly));
   put('eyeLookOut_L',Math.max(0,lx));put('eyeLookIn_R',Math.max(0,lx));put('eyeLookIn_L',Math.max(0,-lx));put('eyeLookOut_R',Math.max(0,-lx));
+  both('eyeSquint',.28);both('eyeBlink',.10);both('browDown',.12);   // a resting face is never wide-eyed
   for(const k in W){const i=dict[k];if(i!=null)inf[i]=W[k];}
   if(eyeL){eyeL.rotation.set(eyeRest.l.x+ly*.32,eyeRest.l.y+lx*.42,eyeRest.l.z);eyeR.rotation.set(eyeRest.r.x+ly*.32,eyeRest.r.y+lx*.42,eyeRest.r.z);}
 
@@ -441,9 +467,16 @@ Object.keys(ST).forEach(k=>{const b=document.createElement('button');b.dataset.s
       if(!o.isMesh)return; o.frustumCulled=false;
       if(o.morphTargetDictionary&&o.morphTargetDictionary.jawOpen!=null){face=o;
         // the sculpt's texture is near-monochrome: tinting it gives the skin its colour, eyes and teeth keep theirs
-        o.material=o.material.clone();o.material.color.set('#e8b99c');o.material.roughness=.58;o.material.metalness=0;}
-      else{o.material=o.material.clone();o.material.roughness=.25;}
-      fadeMat(o.material,o===face?SKIN_X:undefined);
+        o.material=new THREE.MeshPhysicalMaterial({map:o.material.map,color:'#ecbb9f',roughness:.52,metalness:0,
+          sheen:.5,sheenColor:new THREE.Color('#ffb59a'),sheenRoughness:.45,specularIntensity:.55});
+        fadeMat(o.material,SKIN_X);}
+      else{let e=o,eye=false;while(e){if(e===eyeL||e===eyeR||/eye/i.test(e.name))eye=true;e=e.parent;}
+        if(eye){ // a wet cornea over a darker iris
+          o.material=new THREE.MeshPhysicalMaterial({map:o.material.map,roughness:.28,metalness:0,clearcoat:1,clearcoatRoughness:.04});
+          fadeMat(o.material,{key:'eye',fColor:`{float l=dot(diffuseColor.rgb,vec3(.3,.59,.11));
+            float iris=1.-smoothstep(.50,.74,l);
+            diffuseColor.rgb=mix(diffuseColor.rgb*vec3(.97,.94,.92),diffuseColor.rgb*vec3(.52,.36,.24)*1.05,iris);}`});}
+        else{o.material=o.material.clone();o.material.roughness=.3;fadeMat(o.material);}}
     });
     if(!face)throw new Error('no face mesh');
     dict=face.morphTargetDictionary;inf=face.morphTargetInfluences;
