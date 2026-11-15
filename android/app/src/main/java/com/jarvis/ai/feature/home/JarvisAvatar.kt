@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import com.jarvis.ai.core.agent.AssistantState
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.util.Locale
 
@@ -37,6 +38,7 @@ fun JarvisAvatar(
     amplitude: Float,
     reducedMotion: Boolean,
     modifier: Modifier = Modifier,
+    spoken: SpokenLine? = null,
 ) {
     var failed by remember { mutableStateOf(false) }
     if (failed || reducedMotion) {
@@ -56,7 +58,7 @@ fun JarvisAvatar(
                 View(context)
             }
         },
-        update = { view -> (view as? WebView)?.let { bridge.push(it, state, amplitude) } },
+        update = { view -> (view as? WebView)?.let { bridge.push(it, state, amplitude, spoken) } },
         onRelease = { view -> (view as? WebView)?.destroy() },
     )
 }
@@ -74,12 +76,16 @@ internal class AvatarBridge {
     private var wantedState: AssistantState = AssistantState.IDLE
     private var sentLevel = -1f
     private var levelAt = 0L
+    private var sentSpoken = -1
+    private var baselined = false
 
     /** The page was thrown away; the next one starts from nothing. */
     fun reset() {
         ready = false
         sentState = null
         sentLevel = -1f
+        sentSpoken = -1
+        baselined = false
     }
 
     fun onReady(view: WebView) {
@@ -88,10 +94,21 @@ internal class AvatarBridge {
         sendState(view)
     }
 
-    fun push(view: WebView, state: AssistantState, amplitude: Float) {
+    fun push(view: WebView, state: AssistantState, amplitude: Float, spoken: SpokenLine? = null) {
         wantedState = state
         if (!ready) return
         sendState(view)
+
+        // The sentence goes first, so the mouth has its shapes before the sound.
+        if (!baselined) {
+            // A sentence from before this page existed is not replayed on it.
+            baselined = true
+            sentSpoken = spoken?.id ?: -1
+        } else if (spoken != null && spoken.id != sentSpoken) {
+            sentSpoken = spoken.id
+            // quote() makes the text a safe JavaScript string literal.
+            view.evaluateJavascript("window.Jarvis&&Jarvis.say&&Jarvis.say(${JSONObject.quote(spoken.text)})", null)
+        }
 
         val level = amplitude.coerceIn(0f, 1f)
         val now = System.currentTimeMillis()

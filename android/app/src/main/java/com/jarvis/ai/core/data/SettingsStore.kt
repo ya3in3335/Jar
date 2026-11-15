@@ -37,6 +37,8 @@ data class JarvisSettings(
     val voicePitch: String = "-15Hz",
     val voiceRate: String = "-8%",
     val autoSpeak: Boolean = true,
+    /** Turn the media volume up when it is zero and he has something to say. */
+    val raiseMutedVolume: Boolean = true,
     /** Show the head floating over other apps (needs the accessibility service). */
     val floatingAvatar: Boolean = true,
     /** Attach what is on screen to every request, so he sees without being told to look. */
@@ -90,6 +92,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
             voicePitch = p[Keys.PITCH] ?: JarvisSettings().voicePitch,
             voiceRate = p[Keys.RATE] ?: JarvisSettings().voiceRate,
             autoSpeak = p[Keys.AUTO_SPEAK] ?: JarvisSettings().autoSpeak,
+            raiseMutedVolume = p[Keys.RAISE_VOLUME] ?: JarvisSettings().raiseMutedVolume,
             floatingAvatar = p[Keys.FLOATING] ?: JarvisSettings().floatingAvatar,
             screenAware = p[Keys.SCREEN_AWARE] ?: JarvisSettings().screenAware,
             watchScreen = p[Keys.WATCH_SCREEN] ?: JarvisSettings().watchScreen,
@@ -119,6 +122,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
     suspend fun setPitch(value: String) = edit { it[Keys.PITCH] = value }
     suspend fun setRate(value: String) = edit { it[Keys.RATE] = value }
     suspend fun setAutoSpeak(value: Boolean) = edit { it[Keys.AUTO_SPEAK] = value }
+    suspend fun setRaiseMutedVolume(value: Boolean) = edit { it[Keys.RAISE_VOLUME] = value }
     suspend fun setFloatingAvatar(value: Boolean) = edit { it[Keys.FLOATING] = value }
     suspend fun setScreenAware(value: Boolean) = edit { it[Keys.SCREEN_AWARE] = value }
     suspend fun setWatchScreen(value: Boolean) = edit { it[Keys.WATCH_SCREEN] = value }
@@ -145,6 +149,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
         val PITCH = stringPreferencesKey("voice_pitch")
         val RATE = stringPreferencesKey("voice_rate")
         val AUTO_SPEAK = booleanPreferencesKey("auto_speak")
+        val RAISE_VOLUME = booleanPreferencesKey("raise_muted_volume")
         val FLOATING = booleanPreferencesKey("floating_avatar")
         val SCREEN_AWARE = booleanPreferencesKey("screen_aware")
         val WATCH_SCREEN = booleanPreferencesKey("watch_screen")

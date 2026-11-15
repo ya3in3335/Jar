@@ -27,7 +27,7 @@ class VoiceEngine @Inject constructor(
     private val system = SystemTtsProvider(context)
     private val azureStream = AzureStreamingTts(http, secureStore)
     private val azure = AzureTtsProvider(http, secureStore, context.cacheDir)
-    private val groq = GroqTtsProvider(http, secureStore)
+    private val groq = GroqTtsProvider(http, secureStore, context.cacheDir)
     private val relay = RelayTtsProvider(http, secureStore, context.cacheDir)
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -66,6 +66,8 @@ class VoiceEngine @Inject constructor(
         /** The phone's media volume when this was spoken; -1 when unknown. */
         val mediaVolume: Int = -1,
         val mediaMax: Int = 0,
+        /** The media volume was at zero and was turned up for this. */
+        val raisedVolume: Boolean = false,
     ) {
         /** Spoken into a muted phone: correct audio that nobody could hear. */
         val unheard: Boolean get() = mediaVolume == 0
@@ -76,6 +78,21 @@ class VoiceEngine @Inject constructor(
      * stream, so at zero — which a phone's silent mode can force — every
      * voice "works" and nothing is heard.
      */
+    /**
+     * Bring a zero media volume up to a comfortable level, and report
+     * whether that worked. A voice assistant at volume zero is silent for
+     * no visible reason; the user can turn this behaviour off.
+     */
+    private fun raiseMutedVolume(): Boolean {
+        val (level, max) = mediaVolume()
+        if (level != 0 || max <= 0) return false
+        runCatching {
+            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (max * 0.6f).toInt().coerceAtLeast(1), 0)
+        }
+        return mediaVolume().first > 0
+    }
+
     private fun mediaVolume(): Pair<Int, Int> = runCatching {
         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         val level = if (audioManager.isStreamMute(AudioManager.STREAM_MUSIC)) {
@@ -98,8 +115,11 @@ class VoiceEngine @Inject constructor(
         rate: String = "-8%",
         preferredProviderId: String? = null,
         onAmplitude: ((Float) -> Unit)? = null,
+        /** Turn the media volume up first when it is at zero. */
+        raiseIfMuted: Boolean = false,
     ): SpokenBy {
         if (text.isBlank()) return SpokenBy("none", false)
+        val raised = raiseIfMuted && raiseMutedVolume()
 
         // The chosen provider first, then the others, so a failed call
         // still speaks. For Azure the streaming endpoint is tried before the
@@ -130,7 +150,7 @@ class VoiceEngine @Inject constructor(
                     provider.speak(text, voice, pitch, rate, onAmplitude)
                     val (level, max) = mediaVolume()
                     return SpokenBy(
-                        provider.id, fellBack, reason, (provider as? GroqTtsProvider)?.lastDetail, level, max,
+                        provider.id, fellBack, reason, (provider as? GroqTtsProvider)?.lastDetail, level, max, raised,
                     )
                 } catch (e: CancellationException) {
                     throw e // a cancelled utterance is not a provider failure

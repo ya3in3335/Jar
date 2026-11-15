@@ -187,7 +187,7 @@ class FloatingAvatar private constructor(
 
     private fun render(ui: HomeUiState) {
         val view = web ?: return
-        bridge.push(view, ui.state, ui.amplitude)
+        bridge.push(view, ui.state, ui.amplitude, ui.spoken)
 
         val text = when {
             ui.pendingConfirmation != null -> "يحتاج تأكيدك — انقر لفتح جارفيس"

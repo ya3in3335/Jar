@@ -282,6 +282,7 @@ class SettingsViewModel @Inject constructor(
                     pitch = current.voicePitch,
                     rate = current.voiceRate,
                     preferredProviderId = current.voiceProvider,
+                    raiseIfMuted = true, // he pressed the button to hear it
                 )
             }
             val message = result.fold(
@@ -293,7 +294,8 @@ class SettingsViewModel @Inject constructor(
                                 "ارفعه بأزرار الصوت، وإن كان الهاتف في الوضع الصامت فأوقفه أو عطّل «كتم الوسائط» فيه."
                         spoken.fellBack ->
                             listOfNotNull(spoken.reason, "نطق بدلًا منه: ${spoken.providerId}").joinToString(" — ") + volume
-                        else -> "تمّ التشغيل: ${spoken.detail ?: spoken.providerId}$volume"
+                        else -> "تمّ التشغيل: ${spoken.detail ?: spoken.providerId}$volume" +
+                            if (spoken.raisedVolume) " (كان صفرًا فرفعتُه)" else ""
                     }
                 },
                 onFailure = { it.message ?: "تعذّر النطق" },
@@ -314,6 +316,7 @@ class SettingsViewModel @Inject constructor(
     fun setPitch(value: String) = viewModelScope.launch { settingsStore.setPitch(value) }
     fun setRate(value: String) = viewModelScope.launch { settingsStore.setRate(value) }
     fun setAutoSpeak(value: Boolean) = viewModelScope.launch { settingsStore.setAutoSpeak(value) }
+    fun setRaiseMutedVolume(value: Boolean) = viewModelScope.launch { settingsStore.setRaiseMutedVolume(value) }
     fun setFloatingAvatar(value: Boolean) = viewModelScope.launch { settingsStore.setFloatingAvatar(value) }
     fun setScreenAware(value: Boolean) = viewModelScope.launch { settingsStore.setScreenAware(value) }
     fun setWatchScreen(value: Boolean) = viewModelScope.launch { settingsStore.setWatchScreen(value) }

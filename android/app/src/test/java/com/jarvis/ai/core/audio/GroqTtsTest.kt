@@ -256,3 +256,43 @@ class GroqAudioChecksTest {
         assertEquals(8, parsed.pcm.size)
     }
 }
+
+class GroqPlaybackChecksTest {
+
+    private val oneSecond = 48_000 * 2 // bytes of mono 16-bit at 48 kHz
+
+    @Test
+    fun `playback that ends in half the audio's length did not reach the speaker`() {
+        assertTrue(GroqTtsProvider.tooFast(tookMs = 300, pcmBytes = oneSecond * 4, sampleRate = 48_000, speed = 1f))
+        assertFalse(GroqTtsProvider.tooFast(tookMs = 3_900, pcmBytes = oneSecond * 4, sampleRate = 48_000, speed = 1f))
+    }
+
+    @Test
+    fun `a faster speaking rate is not mistaken for failed playback`() {
+        // 4 s of audio at double speed really does take about 2 s.
+        assertFalse(GroqTtsProvider.tooFast(tookMs = 1_900, pcmBytes = oneSecond * 4, sampleRate = 48_000, speed = 2f))
+    }
+
+    @Test
+    fun `very short pieces are never judged`() {
+        assertFalse(GroqTtsProvider.tooFast(tookMs = 5, pcmBytes = oneSecond / 2, sampleRate = 48_000, speed = 1f))
+    }
+
+    @Test
+    fun `a wav built for the media player reads back as the same audio`() {
+        val pcm = ByteArray(200) { (it % 50).toByte() }
+        val parsed = GroqTtsProvider.parseWav(GroqTtsProvider.wavFile(24_000, pcm))!!
+        assertEquals(24_000, parsed.sampleRate)
+        assertTrue(pcm.contentEquals(parsed.pcm))
+    }
+
+    @Test
+    fun `level is zero in silence, positive in sound, and safe past the end`() {
+        val loud = ByteBuffer.allocate(4_000).order(ByteOrder.LITTLE_ENDIAN)
+        while (loud.remaining() >= 2) loud.putShort(12_000)
+        assertEquals(0f, GroqTtsProvider.levelAt(ByteArray(4_000), 0), 0f)
+        assertTrue(GroqTtsProvider.levelAt(loud.array(), 101) > 0.5f)
+        assertTrue(GroqTtsProvider.levelAt(loud.array(), 999_999) >= 0f)
+        assertEquals(0f, GroqTtsProvider.levelAt(ByteArray(0), 0), 0f)
+    }
+}

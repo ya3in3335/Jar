@@ -1,12 +1,16 @@
 package com.jarvis.ai.core.audio
 
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import com.jarvis.ai.core.data.SecureStore
 import com.jarvis.ai.core.data.redact
 import com.jarvis.ai.core.net.ModelProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -15,6 +19,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
@@ -37,6 +42,7 @@ import kotlin.math.roundToInt
 class GroqTtsProvider(
     private val http: OkHttpClient,
     private val secureStore: SecureStore,
+    private val cacheDir: File,
 ) : TtsProvider {
 
     override val id = ID
@@ -45,6 +51,10 @@ class GroqTtsProvider(
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     @Volatile private var player: PcmPlayer? = null
+    @Volatile private var media: MediaPlayer? = null
+
+    /** Set once the raw track proves it does not play on this phone. */
+    @Volatile private var preferMediaPlayer = false
 
     /** What the last successful call played, for the settings preview. */
     @Volatile var lastDetail: String? = null
@@ -81,7 +91,9 @@ class GroqTtsProvider(
                     val describe = { ms: Long ->
                         "Groq · ${spec.voice} · ${wav.sampleRate}Hz · " +
                             "${"%.1f".format(java.util.Locale.US, seconds)} ث · أعلى مستوى ${(peak * 100).toInt()}% · " +
-                            "استغرق التشغيل ${"%.1f".format(java.util.Locale.US, ms / 1000f)} ث"
+                            "استغرق التشغيل ${"%.1f".format(java.util.Locale.US, ms / 1000f)} ث" +
+                            if (preferMediaPlayer) " · مشغّل الوسائط" else ""
+                    }
                     }
                     lastDetail = describe(playedMs)
                     if (index + 1 < pieces.size) {
@@ -116,7 +128,68 @@ class GroqTtsProvider(
         }
     }
 
+    /**
+     * Play one piece. The raw track is tried first; if it "finishes" in far
+     * less time than the audio lasts, the samples never reached the speaker
+     * on this phone, so the piece is played again through MediaPlayer and
+     * that path is kept from then on.
+     */
     private suspend fun play(wav: Wav, pitch: String, rate: String, onAmplitude: ((Float) -> Unit)?) {
+        if (!preferMediaPlayer) {
+            val began = System.nanoTime()
+            val failed = try {
+                playOnTrack(wav, pitch, rate, onAmplitude)
+                false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: IllegalStateException) {
+                true // the track would not open or take samples
+            }
+            val tookMs = (System.nanoTime() - began) / 1_000_000
+            if (!failed && !tooFast(tookMs, wav.pcm.size, wav.sampleRate, PcmPlayer.speedFor(rate))) return
+            preferMediaPlayer = true
+        }
+        playOnMediaPlayer(wav, pitch, rate, onAmplitude)
+    }
+
+    private suspend fun playOnMediaPlayer(wav: Wav, pitch: String, rate: String, onAmplitude: ((Float) -> Unit)?) {
+        val file = withContext(Dispatchers.IO) {
+            File.createTempFile("groq-", ".wav", cacheDir).apply { writeBytes(wavFile(wav.sampleRate, wav.pcm)) }
+        }
+        val player = MediaPlayer()
+        media = player
+        try {
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            withContext(Dispatchers.IO) {
+                player.setDataSource(file.absolutePath)
+                player.prepare()
+            }
+            val speed = PcmPlayer.speedFor(rate)
+            runCatching {
+                player.playbackParams = player.playbackParams.setSpeed(speed).setPitch(PcmPlayer.pitchFor(pitch))
+            }
+            player.start()
+            // No samples pass through our hands here, so the level for the
+            // head is read from the same audio at the position being played.
+            val bytesPerMs = wav.sampleRate * 2 / 1000f
+            while (media === player && runCatching { player.isPlaying }.getOrDefault(false)) {
+                val at = (runCatching { player.currentPosition }.getOrDefault(0) * bytesPerMs).toInt()
+                onAmplitude?.invoke(levelAt(wav.pcm, at))
+                delay(40)
+            }
+        } finally {
+            runCatching { player.release() }
+            if (media === player) media = null
+            file.delete()
+        }
+    }
+
+    private suspend fun playOnTrack(wav: Wav, pitch: String, rate: String, onAmplitude: ((Float) -> Unit)?) {
         val player = PcmPlayer(wav.sampleRate).apply { start(pitch, rate) }
         this.player = player
         try {
@@ -141,6 +214,8 @@ class GroqTtsProvider(
     override fun stop() {
         player?.stop()
         player = null
+        media?.let { runCatching { it.stop() } }
+        media = null
     }
 
     override fun release() = stop()
@@ -200,6 +275,44 @@ class GroqTtsProvider(
             } else {
                 VoiceSpec(MODEL_ARABIC, known.removePrefix(AR))
             }
+        }
+
+        /**
+         * True when playing [pcmBytes] took so little time that it cannot
+         * have come out of the speaker. Short pieces are never judged: their
+         * timing is dominated by buffering.
+         */
+        fun tooFast(tookMs: Long, pcmBytes: Int, sampleRate: Int, speed: Float): Boolean {
+            val audioMs = pcmBytes / 2f / sampleRate * 1000f / speed.coerceAtLeast(0.1f)
+            return audioMs >= 800f && tookMs < audioMs * 0.5f
+        }
+
+        /** Loudness (0..1) of a 20 ms window of [pcm] starting at byte [at]. */
+        fun levelAt(pcm: ByteArray, at: Int): Float {
+            val start = (at - at % 2).coerceIn(0, maxOf(0, pcm.size - 2))
+            val end = minOf(pcm.size - 1, start + 1920)
+            var sum = 0.0
+            var count = 0
+            var index = start
+            while (index < end) {
+                val sample = (pcm[index].toInt() and 0xFF) or (pcm[index + 1].toInt() shl 8)
+                sum += sample.toDouble() * sample
+                count++
+                index += 2
+            }
+            if (count == 0) return 0f
+            return (kotlin.math.sqrt(sum / count) / 32768.0 * 3.2).toFloat().coerceIn(0f, 1f)
+        }
+
+        /** A complete mono 16-bit WAV file around [pcm]. */
+        fun wavFile(sampleRate: Int, pcm: ByteArray): ByteArray {
+            val out = ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN)
+            out.put("RIFF".toByteArray(Charsets.US_ASCII)).putInt(36 + pcm.size)
+            out.put("WAVE".toByteArray(Charsets.US_ASCII))
+            out.put("fmt ".toByteArray(Charsets.US_ASCII)).putInt(16)
+            out.putShort(1).putShort(1).putInt(sampleRate).putInt(sampleRate * 2).putShort(2).putShort(16)
+            out.put("data".toByteArray(Charsets.US_ASCII)).putInt(pcm.size).put(pcm)
+            return out.array()
         }
 
         /** Loudest sample as 0..1; 0 means the audio is pure silence. */

@@ -126,6 +126,58 @@ function fadeTo(name,once){
 
 /* ===================== PUBLIC API ===================== */
 let nodUntil=0, smileUntil=0, T=0;
+
+/* ===================== SPEECH: MOUTH SHAPED BY THE TEXT, GESTURES BY ITS MEANING =====================
+   The model has one jaw shape (mouthOpen) and one smile, no visemes. So each letter becomes a small
+   open/wide target, the real audio level gates it, and the result reads as lips following the words. */
+let talk=null;                 // {open,wide,cues,dur,t0,armed}
+const gestures=[];             // {type,at,dur}
+let nextFidget=6;
+const HARAKAT={'َ':[.95,0],'ُ':[.5,-.25],'ِ':[.4,.8],'ْ':[.05,0]};
+function shapeOf(ch){
+  if(/[اآأإىaà-å]/i.test(ch))return[1,.1];
+  if(/[وؤoò-öuù-üw]/i.test(ch))return[.5,-.3];
+  if(/[يئeè-ëiì-ïy]/i.test(ch))return[.42,.8];
+  if(/[مبپpbm]/i.test(ch))return[0,0];
+  if(/[فvf]/i.test(ch))return[.1,.25];
+  if(/[عحهخغقhg]/i.test(ch))return[.6,0];
+  if(/[سشزصثذظتدطنلرszتtdnlr]/i.test(ch))return[.24,.35];
+  if(/[0-9٠-٩]/.test(ch))return[.6,.2];
+  return[.3,.15];
+}
+function buildTalk(text){
+  const open=[],wide=[];
+  const push=(o,w,n)=>{for(let i=0;i<n;i++){open.push(o);wide.push(w);}};
+  for(const ch of text){
+    const h=HARAKAT[ch];
+    if(h){if(open.length){open[open.length-1]=h[0];wide[wide.length-1]=h[1];}continue;}
+    if(/\s/.test(ch)){push(.06,0,1);continue;}
+    if(/[.!?؟…\n]/.test(ch)){push(0,0,5);continue;}
+    if(/[,،;؛:—-]/.test(ch)){push(0,0,3);continue;}
+    if(!/[\p{L}\p{N}]/u.test(ch))continue;
+    const [o,w]=shapeOf(ch);
+    push(o*.55,w,1);push(o,w,1);          // the consonant closes a little, then its vowel opens
+  }
+  return{open,wide,cues:[],dur:Math.max(.5,open.length*.036),t0:-1,armed:performance.now()};
+}
+const CUES=[
+  ['laugh',/(ههه+|haha+|\blol\b)/i],
+  ['no',/(آسف|عذر|للأسف|لا أستطيع|لا يمكن|لم أتمكن|تعذّر|تعذر|فشل|خطأ|sorry|cannot|can't|unable|failed|unfortunately)/i],
+  ['warn',/(انتبه|تحذير|احذر|خطر|warning|careful|caution|danger)/i],
+  ['greet',/(مرحب|أهلا|أهلًا|السلام عليكم|صباح|مساء|hello|\bhi\b|\bhey\b|welcome)/i],
+  ['joy',/(رائع|ممتاز|جميل|عظيم|مبروك|أحسنت|great|awesome|excellent|perfect|congrat|well done)/i],
+  ['think',/(ربما|أظن|أعتقد|لحظة|دعني|قد يكون|maybe|perhaps|i think|let me|hmm)/i],
+  ['yes',/(^|[\s"«])(نعم|أجل|تمّ|تم|حاضر|بالتأكيد|طبعًا|طبعا|تمام|أكيد|yes|sure|done|okay|ok|certainly|of course)(?=$|[\s.,!،؛"»])/i],
+  ['ask',/[?؟]/]];
+const GDUR={yes:.9,no:1.1,ask:1.3,greet:1.1,joy:1.2,think:1.6,laugh:1.2,warn:1.1,beat:.45};
+function cueFor(clause){for(const [t,re] of CUES)if(re.test(clause))return t;return /!/.test(clause)?'joy':'beat';}
+/** Tell the head what is being said: the mouth follows the letters, the head reacts to the meaning. */
+function speakText(text){
+  text=String(text||'').trim();if(!text)return;
+  talk=buildTalk(text);
+  const parts=text.split(/(?<=[.!?؟…\n,،;؛:])/);let pos=0;const total=Math.max(1,text.length);
+  talk.cues=parts.filter(p=>p.trim()).map(p=>{const c={type:cueFor(p),at:pos/total};pos+=p.length;return c;});
+}
 function setState(s){
   s=String(s||'').toLowerCase(); if(!ST[s]||s===state&&s!=='success'&&s!=='error')return;
   state=s; accT.set(ST[s].c);
@@ -137,11 +189,12 @@ function setState(s){
   if(!EMBED){const say=$('say');
     const txt={speaking:'مرحبًا، أنا جارفيس. كيف أستطيع مساعدتك؟',listening:'أنا أسمعك…',thinking:'لحظة، أفكّر في ذلك…',executing:'جاري تنفيذ الأمر…',
       success:'تمّ بنجاح.',error:'عذرًا، حدث خطأ.',disconnected:'انقطع الاتصال.',understanding:'أحلّل ما قلته…'}[s];
-    if(txt){say.textContent=txt;say.classList.remove('off');}else say.classList.add('off');}
+    if(txt){say.textContent=txt;say.classList.remove('off');}else say.classList.add('off');
+    if(s==='speaking')speakText(txt);}
 }
 function setLevel(v){level=clamp(+v||0,0,1);levelAt=performance.now();}
-window.Jarvis={setState,setLevel,states:Object.keys(ST),get state(){return state;}};
-addEventListener('message',e=>{const d=e.data;if(!d||d.type!=='jarvis')return;if(d.state)setState(d.state);if(d.level!=null)setLevel(d.level);});
+window.Jarvis={setState,setLevel,say:speakText,states:Object.keys(ST),get state(){return state;}};
+addEventListener('message',e=>{const d=e.data;if(!d||d.type!=='jarvis')return;if(d.state)setState(d.state);if(d.level!=null)setLevel(d.level);if(d.say)speakText(d.say);});
 
 /* ===================== INPUT ===================== */
 let px=0,py=0,pAt=-1e9,down=null;
@@ -154,7 +207,7 @@ cv.addEventListener('pointerup',e=>{if(down&&performance.now()-down.t<320&&Math.
 /* ===================== LOOP ===================== */
 const _e=new THREE.Euler(),_q=new THREE.Quaternion(),hp=new THREE.Vector3(),np=new THREE.Vector3();
 const add=(k,x,y,z)=>{const b=B[k];if(!b)return;_e.set(x,y,z);_q.setFromEuler(_e);b.quaternion.multiply(_q);};
-const S={pitch:0,yaw:0,roll:0,ex:0,ey:0,mouth:0,smile:0,lv:0,gray:0,hudS:1,camZ:1};
+const S={pitch:0,yaw:0,roll:0,ex:0,ey:0,mouth:0,wide:0,smile:0,lv:0,gray:0,hudS:1,camZ:1};
 let last=performance.now(),first=true;
 function camDist(){const a=innerWidth/innerHeight;return Math.max(1.22,1.06/a)*(EMBED?.9:1);}
 function tick(now){
@@ -177,18 +230,53 @@ function tick(now){
   if(state==='speaking'){tp+=S.lv*.05*Math.sin(T*7);ty+=Math.sin(T*1.3)*.05;}
   if(state==='disconnected'){ty=0;tp=.26;tex=0;tey=.2;tr=.03;}
   if(T<nodUntil)tp+=.16*Math.sin((nodUntil-T)/.9*Math.PI*2);
+  // the text timeline: starts with the first real sound, so the lips are not ahead of the voice
+  let shO=-1,shW=0;
+  if(talk){
+    if(talk.t0<0&&(S.lv>.035||(!ext&&state==='speaking'&&now-talk.armed>300)))talk.t0=T;
+    if(talk.t0<0){if(now-talk.armed>8000)talk=null;}
+    else{const u=(T-talk.t0)/talk.dur;
+      if(u>=1.15)talk=null;
+      else{const n=talk.open.length,f=clamp(u,0,.9999)*n,i=Math.floor(f),k=f-i,j=Math.min(i+1,n-1);
+        shO=talk.open[i]+(talk.open[j]-talk.open[i])*k;shW=talk.wide[i]+(talk.wide[j]-talk.wide[i])*k;
+        while(talk.cues.length&&talk.cues[0].at<=u){const c=talk.cues.shift();gestures.push({type:c.type,at:T,dur:GDUR[c.type]||.8});}}}
+  }
+  // a still head looks switched off: when idle he shifts, glances and tilts on his own
+  if(state==='idle'&&!talk&&T>nextFidget){gestures.push({type:['ask','think','beat','beat'][Math.floor(Math.random()*4)],at:T,dur:1.6});nextFidget=T+6+Math.random()*8;}
+  let gp=0,gy=0,gr=0,gSmile=0,gEye=0;
+  for(let i=gestures.length-1;i>=0;i--){const g=gestures[i],u=(T-g.at)/g.dur;
+    if(u>=1){gestures.splice(i,1);continue;} if(u<0)continue;
+    const e=Math.sin(Math.PI*u);
+    switch(g.type){
+      case'yes':gp+=.15*Math.sin(u*4*Math.PI)*e;break;
+      case'no':gy+=.2*Math.sin(u*5*Math.PI)*e;break;
+      case'ask':gr+=.13*e;gp-=.06*e;break;
+      case'greet':gp+=.13*Math.sin(u*2*Math.PI)*e;gSmile=Math.max(gSmile,e);break;
+      case'joy':gp-=.07*e;gSmile=Math.max(gSmile,e);break;
+      case'think':gy+=.2*e;gp-=.12*e;gEye=-.25*e;break;
+      case'laugh':gp+=.05*Math.sin(u*10*Math.PI);gSmile=1;break;
+      case'warn':gp+=.11*e;gr-=.05*e;break;
+      default:gp+=.05*e;}}
   S.yaw=damp(S.yaw,ty,5,dt);S.pitch=damp(S.pitch,tp,5,dt);S.roll=damp(S.roll,tr,4,dt);
-  S.ex=damp(S.ex,tex,9,dt);S.ey=damp(S.ey,tey,9,dt);
-  S.mouth=damp(S.mouth,state==='speaking'?clamp(S.lv*1.25,0,1):0,22,dt);
-  S.smile=damp(S.smile,(T<smileUntil||state==='success')?1:(state==='idle'||state==='listening'?.18:0),5,dt);
+  const hp_=S.pitch+gp,hy_=S.yaw+gy,hr_=S.roll+gr;
+  S.ex=damp(S.ex,tex,9,dt);S.ey=damp(S.ey,tey+gEye,9,dt);
+  let mouthT=0;
+  if(state==='speaking'){
+    // letters give the shape, the audio gives the force; with no text it follows loudness alone
+    mouthT=shO>=0?shO*(.3+.7*clamp(S.lv*1.8,0,1)):clamp(S.lv*1.25,0,1);
+    if(ext&&S.lv<.02)mouthT=0;
+  }
+  S.mouth=damp(S.mouth,mouthT,30,dt);
+  S.wide=damp(S.wide,state==='speaking'&&shO>=0?shW:0,18,dt);
+  S.smile=damp(S.smile,Math.max(gSmile,(T<smileUntil||state==='success')?1:(state==='idle'||state==='listening'?.18:0)),6,dt);
   S.gray=damp(S.gray,state==='disconnected'?1:0,4,dt);
 
   for(const k in B)B[k].quaternion.copy(G.userData.rest[k].q);
   mixer.update(dt);
-  add('Spine2',S.pitch*.15,S.yaw*.2,0);add('Neck',S.pitch*.35,S.yaw*.35,S.roll*.4);add('Head',S.pitch*.6,S.yaw*.55,S.roll*.6);
+  add('Spine2',hp_*.15,hy_*.2,0);add('Neck',hp_*.35,hy_*.35,hr_*.4);add('Head',hp_*.6,hy_*.55,hr_*.6);
   add('LeftEye',S.ey,S.ex,0);add('RightEye',S.ey,S.ex,0);
   for(const f of faces){const d=f.morphTargetDictionary,inf=f.morphTargetInfluences;
-    if(d.mouthOpen!=null)inf[d.mouthOpen]=S.mouth*.85;if(d.mouthSmile!=null)inf[d.mouthSmile]=S.smile*.75;}
+    if(d.mouthOpen!=null)inf[d.mouthOpen]=S.mouth*.85;if(d.mouthSmile!=null)inf[d.mouthSmile]=clamp(S.smile*.75+S.wide*.35,0,1);}
   G.userData.wrap.updateMatrixWorld(true);
   B.Head.getWorldPosition(hp);B.Neck.getWorldPosition(np);
   FU.uNeck.value=damp(FU.uNeck.value,np.y+.012,first?999:10,dt);FU.uGray.value=S.gray;

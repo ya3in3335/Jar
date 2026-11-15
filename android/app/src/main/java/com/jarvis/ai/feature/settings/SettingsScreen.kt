@@ -462,6 +462,11 @@ fun SettingsScreen(
                 checked = settings.autoSpeak,
                 onChange = viewModel::setAutoSpeak,
             )
+            ToggleRow(
+                label = "ارفع صوت الوسائط إن كان صفرًا",
+                checked = settings.raiseMutedVolume,
+                onChange = viewModel::setRaiseMutedVolume,
+            )
         }
 
         // -------------------------------------------------- automation

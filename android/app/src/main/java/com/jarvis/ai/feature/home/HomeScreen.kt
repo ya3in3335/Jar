@@ -123,6 +123,7 @@ fun HomeScreen(
         JarvisAvatar(
             state = ui.state,
             amplitude = ui.amplitude,
+            spoken = ui.spoken,
             reducedMotion = settings.reducedMotion,
             modifier = Modifier
                 .fillMaxWidth(0.86f)

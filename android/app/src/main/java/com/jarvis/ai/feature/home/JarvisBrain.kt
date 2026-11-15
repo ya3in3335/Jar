@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
@@ -52,9 +53,14 @@ data class HomeUiState(
     val activity: String? = null,
     val lastError: String? = null,
     val tokensThisSession: Int = 0,
+    /** The sentence being spoken right now, so the head can mouth it. */
+    val spoken: SpokenLine? = null,
 ) {
     val canCancel: Boolean get() = state.isBusy
 }
+
+/** [id] changes with every sentence, even when two sentences read the same. */
+data class SpokenLine(val id: Int, val text: String)
 
 data class PendingAction(val description: String, val toolName: String, val args: JsonObject)
 
@@ -100,6 +106,7 @@ class JarvisBrain @Inject constructor(
     private var sttJob: Job? = null
     private var confirmation: CompletableDeferred<Boolean>? = null
     private var watchJob: Job? = null
+    private var spokenSeq = 0
     private var lastWatchAt = 0L
 
     init {
@@ -189,6 +196,7 @@ class JarvisBrain @Inject constructor(
                 scope = scope,
                 speak = { chunk ->
                     go(AssistantState.SPEAKING)
+                    announce(chunk)
                     noteFallback(
                         voice.speak(
                             text = chunk,
@@ -196,6 +204,8 @@ class JarvisBrain @Inject constructor(
                             pitch = current.voicePitch,
                             rate = current.voiceRate,
                             preferredProviderId = current.voiceProvider,
+                            onAmplitude = ::onVoiceLevel,
+                            raiseIfMuted = current.raiseMutedVolume,
                         ),
                     )
                 },
@@ -379,6 +389,19 @@ class JarvisBrain @Inject constructor(
         }
     }
 
+    /** Hand the sentence to the head before its audio starts. */
+    private fun announce(text: String) {
+        _ui.update { it.copy(spoken = SpokenLine(++spokenSeq, text)) }
+    }
+
+    /**
+     * The loudness of what is coming out of the speaker, for the mouth.
+     * Called from the playback thread, hence the atomic update.
+     */
+    private fun onVoiceLevel(level: Float) {
+        _ui.update { it.copy(amplitude = level.coerceIn(0f, 1f)) }
+    }
+
     /** Show why the chosen voice was not the one that spoke. */
     private fun noteFallback(spoken: VoiceEngine.SpokenBy) {
         if (spoken.unheard) {
@@ -398,6 +421,7 @@ class JarvisBrain @Inject constructor(
         // Deaf while talking: otherwise the microphone hears the speaker
         // and JARVIS transcribes himself into an endless conversation.
         stt.pauseUplink()
+        announce(text)
         runCatching {
             noteFallback(
                 voice.speak(
@@ -406,6 +430,8 @@ class JarvisBrain @Inject constructor(
                     pitch = current.voicePitch,
                     rate = current.voiceRate,
                     preferredProviderId = current.voiceProvider,
+                    onAmplitude = ::onVoiceLevel,
+                    raiseIfMuted = current.raiseMutedVolume,
                 ),
             )
         }.onFailure { e ->
@@ -455,7 +481,10 @@ class JarvisBrain @Inject constructor(
         meterJob?.cancel()
         meterJob = scope.launch {
             capture.frames.collect { frame ->
-                _ui.value = _ui.value.copy(amplitude = frame.level)
+                // While he speaks, the level shown is his voice, not the room.
+                if (_ui.value.state != AssistantState.SPEAKING) {
+                    _ui.update { it.copy(amplitude = frame.level) }
+                }
             }
         }
 

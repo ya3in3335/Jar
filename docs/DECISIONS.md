@@ -278,3 +278,29 @@ for confirmation.
 Not verified on a device: the overlay itself, and whether the microphone
 opens from the overlay while another app is in front (Android limits
 background microphone use; an accessibility service is normally exempt).
+
+## D17 — The mouth follows the words, the head follows the meaning, and silence is handled
+
+**Lips.** The model has one jaw shape and one smile, no visemes. The page
+now takes the sentence being spoken (`Jarvis.say(text)`), turns each letter
+into a small open/wide target (Arabic and Latin, harakat included), and lets
+the real loudness of the playing audio gate it. The timeline starts with the
+first real sound, so the lips are not ahead of the voice. Timing is estimated
+from the text, not aligned to phonemes: it reads as speech, it is not exact.
+
+**Gestures.** Each clause of the reply picks a movement from what it says:
+a nod on agreement, a shake on refusal or apology, a tilt on a question, a
+smile on praise or a greeting, a glance away on "maybe", a lean on a warning.
+Idle, he shifts and glances on his own.
+
+**Silence.** A device played Groq audio with a 68% peak and nothing was
+heard, with no error anywhere. Two defences, since the cause could not be
+seen from here:
+
+- If the media volume is zero when he must speak, it is raised (setting, on
+  by default; the voice preview always does it).
+- If the raw audio track "finishes" in under half the audio's length, the
+  samples never reached the speaker: the piece is replayed through
+  `MediaPlayer`, and that path is kept for the session.
+
+The voice level for the mouth now comes from playback itself, not the mic.
