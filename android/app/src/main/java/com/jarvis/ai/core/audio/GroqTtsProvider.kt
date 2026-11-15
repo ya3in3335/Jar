@@ -94,7 +94,6 @@ class GroqTtsProvider(
                             "استغرق التشغيل ${"%.1f".format(java.util.Locale.US, ms / 1000f)} ث" +
                             if (preferMediaPlayer) " · مشغّل الوسائط" else ""
                     }
-                    }
                     lastDetail = describe(playedMs)
                     if (index + 1 < pieces.size) {
                         next = async(Dispatchers.IO) { fetch(key, spec, pieces[index + 1]) }
